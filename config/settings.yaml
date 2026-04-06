@@ -24,8 +24,8 @@ models:
     reason:   "Runs on every single message. Must be lightning fast to avoid blocking the app."
 
   collect:
-    provider: ollama
-    model:    llama3.1:8b
+    provider: groq
+    model:    llama-3.1-8b-instant
     reason:   "Extracts national IDs, emails, phones — direct PII"
 
   document:

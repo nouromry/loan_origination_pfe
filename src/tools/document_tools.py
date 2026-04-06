@@ -1,5 +1,12 @@
 # src/tools/document_tools.py
 
+"""
+Document processing tools — TRILINGUAL (Arabic + French + English).
+
+All keyword detection, document classification, and field extraction
+supports Arabic, French, and English text from Tunisian documents.
+"""
+
 import os
 import re
 from langchain_core.tools import tool
@@ -23,11 +30,34 @@ except ImportError:
     TESSERACT_AVAILABLE = False
 
 
+# ---------------------------------------------------------------
+# Arabic month mapping (used across multiple tools)
+# ---------------------------------------------------------------
+AR_MONTHS = {
+    "جانفي": "01", "يناير": "01",
+    "فيفري": "02", "فبراير": "02",
+    "مارس": "03",
+    "أفريل": "04", "أبريل": "04",
+    "ماي": "05", "مايو": "05",
+    "جوان": "06", "يونيو": "06",
+    "جويلية": "07", "يوليو": "07",
+    "أوت": "08", "أغسطس": "08",
+    "سبتمبر": "09",
+    "أكتوبر": "10",
+    "نوفمبر": "11",
+    "ديسمبر": "12",
+}
+
+
+# ---------------------------------------------------------------
+# Text Extraction
+# ---------------------------------------------------------------
+
 @tool
 def extract_text(file_path: str) -> Dict[str, Any]:
     """Extracts raw text from a PDF document.
-    
-    Uses a fallback chain: PyMuPDF → pdfplumber.
+
+    Uses a fallback chain: PyMuPDF -> pdfplumber.
     Returns the extracted text, page count, and extraction method used.
     """
     if not os.path.exists(file_path):
@@ -51,7 +81,7 @@ def extract_text(file_path: str) -> Dict[str, Any]:
                     "method": "pymupdf",
                 }
         except Exception:
-            pass  # Fall through to next strategy
+            pass
 
     # Strategy 2: pdfplumber (better for table-heavy PDFs)
     if pdfplumber is not None:
@@ -80,17 +110,84 @@ def extract_text(file_path: str) -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------
+# OCR — Trilingual (Arabic + French + English)
+# ---------------------------------------------------------------
+
+@tool
+def ocr_extract_text(file_path: str) -> Dict[str, Any]:
+    """Extract text from a scanned PDF or image using OCR (Tesseract).
+
+    Supports: PDF (rasterizes pages), PNG, JPG, TIFF.
+    Languages: Arabic + French + English (trilingual).
+    """
+    if not os.path.exists(file_path):
+        return {"success": False, "error": f"File not found: {file_path}"}
+
+    if not TESSERACT_AVAILABLE:
+        return {
+            "success": False,
+            "error": "OCR not available. Install: pip install pytesseract Pillow, plus Tesseract system package.",
+        }
+
+    # Trilingual OCR: Arabic + French + English
+    ocr_lang = "ara+fra+eng"
+
+    try:
+        ext = os.path.splitext(file_path)[1].lower()
+        ocr_text = ""
+
+        if ext == ".pdf":
+            if fitz is None:
+                return {"success": False, "error": "PyMuPDF needed for PDF OCR. pip install pymupdf"}
+
+            doc = fitz.open(file_path)
+            for page in doc:
+                pix = page.get_pixmap(dpi=300)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                page_text = pytesseract.image_to_string(img, lang=ocr_lang)
+                ocr_text += page_text + "\n"
+            doc.close()
+
+        elif ext in (".png", ".jpg", ".jpeg", ".tiff", ".tif"):
+            img = Image.open(file_path)
+            ocr_text = pytesseract.image_to_string(img, lang=ocr_lang)
+
+        else:
+            return {"success": False, "error": f"Unsupported file type for OCR: {ext}"}
+
+        if ocr_text.strip():
+            return {
+                "success": True,
+                "text": ocr_text.strip(),
+                "method": "tesseract_ocr",
+                "languages": ocr_lang,
+            }
+        else:
+            return {"success": False, "error": "OCR produced no text. Image quality may be too low."}
+
+    except Exception as e:
+        return {"success": False, "error": f"OCR failed: {str(e)}"}
+
+
+# ---------------------------------------------------------------
+# Document Classification — Trilingual
+# ---------------------------------------------------------------
+
 @tool
 def classify_document_type(file_name: str, extracted_text: str) -> str:
-    """Classifies the document based on keywords in the extracted text.
-    
+    """Classifies the document based on trilingual keyword matching.
+
+    Supports Arabic, French, and English keywords.
     Returns one of: salary_slip, bank_statement, cin_card, income_statement,
     balance_sheet, business_registration, tax_return, collateral_appraisal,
     business_plan, or unknown.
     """
-    text_lower = extracted_text.lower()
+    text = extracted_text.lower()
 
-    # Score each document type by keyword matches (more keywords = higher confidence)
+    # Also check the original (non-lowered) for Arabic since Arabic has no case
+    text_orig = extracted_text
+
     scores: Dict[str, int] = {
         "salary_slip": 0,
         "bank_statement": 0,
@@ -103,59 +200,159 @@ def classify_document_type(file_name: str, extracted_text: str) -> str:
         "business_plan": 0,
     }
 
-    # Salary slip keywords
-    for kw in ["salary", "payslip", "bulletin de paie", "net pay", "gross pay",
-                "employer", "employeur", "salaire", "fiche de paie"]:
-        if kw in text_lower:
+    # --- Salary Slip ---
+    # English
+    for kw in ["salary", "payslip", "pay slip", "net pay", "gross pay", "employer",
+                "earnings", "deductions", "take-home"]:
+        if kw in text:
+            scores["salary_slip"] += 1
+    # French
+    for kw in ["bulletin de paie", "fiche de paie", "salaire", "employeur",
+                "salaire brut", "salaire net", "rémunération"]:
+        if kw in text:
+            scores["salary_slip"] += 1
+    # Arabic
+    for kw in ["كشف الراتب", "بيان الراتب", "الراتب الصافي", "الراتب الإجمالي",
+                "المشغل", "الأجر", "قسيمة الأجر"]:
+        if kw in text_orig:
             scores["salary_slip"] += 1
 
-    # Bank statement keywords
-    for kw in ["account statement", "relevé bancaire", "transaction", "credit",
-                "debit", "opening balance", "closing balance", "solde"]:
-        if kw in text_lower:
+    # --- Bank Statement ---
+    # English
+    for kw in ["account statement", "bank statement", "transaction", "opening balance",
+                "closing balance", "debit", "credit", "account number"]:
+        if kw in text:
+            scores["bank_statement"] += 1
+    # French
+    for kw in ["relevé bancaire", "relevé de compte", "solde", "opérations",
+                "virement", "retrait", "dépôt"]:
+        if kw in text:
+            scores["bank_statement"] += 1
+    # Arabic
+    for kw in ["كشف حساب", "كشف بنكي", "رصيد", "عمليات", "حوالة",
+                "سحب", "إيداع", "رقم الحساب"]:
+        if kw in text_orig:
             scores["bank_statement"] += 1
 
-    # CIN card keywords
+    # --- CIN Card ---
+    # French
     for kw in ["république tunisienne", "carte d'identité", "carte nationale",
-                "cin", "identité nationale", "date de naissance"]:
-        if kw in text_lower:
+                "identité nationale", "date de naissance"]:
+        if kw in text:
             scores["cin_card"] += 1
+    # Arabic
+    for kw in ["الجمهورية التونسية", "بطاقة التعريف", "بطاقة التعريف الوطنية",
+                "تاريخ الولادة", "اللقب", "الاسم", "عنوانها"]:
+        if kw in text_orig:
+            scores["cin_card"] += 1
+    # English
+    for kw in ["national identity", "national id card", "identity card"]:
+        if kw in text:
+            scores["cin_card"] += 1
+    # Also check for 8-digit number which is typical CIN format
+    if re.search(r'(?<!\d)\d{8}(?!\d)', extracted_text):
+        scores["cin_card"] += 1
 
-    # Income statement keywords
-    for kw in ["income statement", "compte de résultat", "revenue", "chiffre d'affaires",
-                "net income", "résultat net", "total expenses", "charges"]:
-        if kw in text_lower:
+    # --- Income Statement ---
+    # English
+    for kw in ["income statement", "profit and loss", "p&l", "revenue",
+                "net income", "total expenses", "operating income", "gross profit"]:
+        if kw in text:
+            scores["income_statement"] += 1
+    # French
+    for kw in ["compte de résultat", "chiffre d'affaires", "résultat net",
+                "charges", "produits", "résultat d'exploitation"]:
+        if kw in text:
+            scores["income_statement"] += 1
+    # Arabic
+    for kw in ["بيان الدخل", "قائمة الدخل", "الإيرادات", "صافي الربح",
+                "المصاريف", "الأرباح", "رقم المعاملات"]:
+        if kw in text_orig:
             scores["income_statement"] += 1
 
-    # Balance sheet keywords
-    for kw in ["balance sheet", "bilan", "total assets", "actif total",
-                "total liabilities", "passif", "equity", "capitaux propres"]:
-        if kw in text_lower:
+    # --- Balance Sheet ---
+    # English
+    for kw in ["balance sheet", "total assets", "total liabilities", "equity",
+                "shareholders equity", "current assets", "current liabilities"]:
+        if kw in text:
+            scores["balance_sheet"] += 1
+    # French
+    for kw in ["bilan", "actif total", "passif", "capitaux propres",
+                "actif circulant", "passif circulant", "fonds propres"]:
+        if kw in text:
+            scores["balance_sheet"] += 1
+    # Arabic
+    for kw in ["الميزانية", "الميزانية العمومية", "الأصول", "الخصوم",
+                "حقوق الملكية", "رؤوس الأموال", "أصول متداولة"]:
+        if kw in text_orig:
             scores["balance_sheet"] += 1
 
-    # Business registration
-    for kw in ["registre du commerce", "business registration", "patente",
-                "registre national", "matricule fiscal"]:
-        if kw in text_lower:
+    # --- Business Registration ---
+    # French
+    for kw in ["registre du commerce", "registre national", "matricule fiscal",
+                "patente", "code d'activité", "forme juridique"]:
+        if kw in text:
+            scores["business_registration"] += 1
+    # Arabic
+    for kw in ["السجل التجاري", "المعرف الجبائي", "الشكل القانوني",
+                "رقم التسجيل", "النشاط الرئيسي"]:
+        if kw in text_orig:
+            scores["business_registration"] += 1
+    # English
+    for kw in ["business registration", "trade register", "tax id", "company registration",
+                "legal form", "incorporation"]:
+        if kw in text:
             scores["business_registration"] += 1
 
-    # Tax return
-    for kw in ["tax return", "déclaration fiscale", "impôt", "fiscal year"]:
-        if kw in text_lower:
+    # --- Tax Return ---
+    # English
+    for kw in ["tax return", "fiscal year", "taxable income", "tax declaration"]:
+        if kw in text:
+            scores["tax_return"] += 1
+    # French
+    for kw in ["déclaration fiscale", "impôt", "exercice fiscal",
+                "déclaration annuelle", "revenu imposable"]:
+        if kw in text:
+            scores["tax_return"] += 1
+    # Arabic
+    for kw in ["التصريح الضريبي", "الإقرار الضريبي", "الدخل الخاضع للضريبة",
+                "السنة المالية"]:
+        if kw in text_orig:
             scores["tax_return"] += 1
 
-    # Collateral appraisal
-    for kw in ["appraisal", "évaluation", "collateral", "market value", "property"]:
-        if kw in text_lower:
+    # --- Collateral Appraisal ---
+    # English
+    for kw in ["appraisal", "collateral", "market value", "property valuation",
+                "estimated value"]:
+        if kw in text:
+            scores["collateral_appraisal"] += 1
+    # French
+    for kw in ["évaluation", "garantie", "valeur vénale", "expertise immobilière",
+                "valeur estimée"]:
+        if kw in text:
+            scores["collateral_appraisal"] += 1
+    # Arabic
+    for kw in ["تقييم", "ضمان", "القيمة السوقية", "خبرة عقارية"]:
+        if kw in text_orig:
             scores["collateral_appraisal"] += 1
 
-    # Business plan
-    for kw in ["business plan", "plan d'affaires", "financial projections",
-                "market analysis", "executive summary"]:
-        if kw in text_lower:
+    # --- Business Plan ---
+    # English
+    for kw in ["business plan", "financial projections", "market analysis",
+                "executive summary", "growth strategy"]:
+        if kw in text:
+            scores["business_plan"] += 1
+    # French
+    for kw in ["plan d'affaires", "plan de développement", "étude de marché",
+                "projections financières", "résumé exécutif"]:
+        if kw in text:
+            scores["business_plan"] += 1
+    # Arabic
+    for kw in ["خطة العمل", "خطة الأعمال", "دراسة السوق", "التوقعات المالية"]:
+        if kw in text_orig:
             scores["business_plan"] += 1
 
-    # Return the type with the highest score, or unknown
+    # Return highest score or unknown
     best_type = max(scores, key=scores.get)
     if scores[best_type] == 0:
         return "unknown"
@@ -163,23 +360,15 @@ def classify_document_type(file_name: str, extracted_text: str) -> str:
 
 
 # ---------------------------------------------------------------
-# CIN Card Parsing
+# CIN Card Parsing — Trilingual
 # ---------------------------------------------------------------
 
 @tool
 def parse_cin_card(extracted_text: str) -> Dict[str, Any]:
-    """Parse a Tunisian CIN (Carte d'Identité Nationale) card from extracted text.
+    """Parse a Tunisian CIN card from extracted text.
 
-    Extracts: national_id (8 digits), full_name, date_of_birth, address.
-    Uses regex patterns first, then returns what it found.
-
-    Handles both French and Arabic text from the CIN card.
-    The Tunisian CIN contains:
-      - CIN number: 8 digits (front of card)
-      - Full name in Arabic and French/Latin
-      - Date of birth (dd/mm/yyyy or dd-mm-yyyy)
-      - Place of birth
-      - Address
+    Supports Arabic, French, and English OCR output.
+    Extracts: national_id (8 digits), name, date_of_birth, address.
     """
     if not extracted_text or not extracted_text.strip():
         return {"success": False, "error": "Empty text — CIN card may need OCR"}
@@ -187,7 +376,7 @@ def parse_cin_card(extracted_text: str) -> Dict[str, Any]:
     text = extracted_text.strip()
     result: Dict[str, Any] = {"success": True}
 
-    # 1. Extract CIN number (8 consecutive digits)
+    # ---- 1. CIN Number (8 digits) — language-independent ----
     cin_match = re.search(r'(?<!\d)(\d{8})(?!\d)', text)
     if cin_match:
         result["cin_national_id"] = cin_match.group(1)
@@ -195,51 +384,100 @@ def parse_cin_card(extracted_text: str) -> Dict[str, Any]:
         result["cin_national_id"] = None
         result["cin_id_warning"] = "Could not find 8-digit CIN number"
 
-    # 2. Extract date of birth
-    #    Tunisian format: dd/mm/yyyy or dd-mm-yyyy or dd.mm.yyyy
-    dob_patterns = [
-        r'(?:n[ée]\s+le|date\s+de\s+naissance|born)\s*:?\s*(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})',
-        r'(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{4})',  # Any dd/mm/yyyy pattern
-    ]
+    # ---- 2. Date of Birth ----
     result["cin_date_of_birth"] = None
-    for pattern in dob_patterns:
-        dob_match = re.search(pattern, text, re.IGNORECASE)
-        if dob_match:
-            result["cin_date_of_birth"] = dob_match.group(1)
-            break
 
-    # 3. Extract name
-    #    Common patterns on Tunisian CIN:
-    #    "Nom et Prénom: ..." or "Nom: ... Prénom: ..."
-    name_patterns = [
-        r'(?:nom\s+et\s+pr[ée]nom|full\s+name)\s*:?\s*([A-Za-zÀ-ÿ\s\-]+)',
-        r'nom\s*:?\s*([A-Za-zÀ-ÿ\-]+)\s+pr[ée]nom\s*:?\s*([A-Za-zÀ-ÿ\s\-]+)',
-        r'(?:mr?s?\.?|m(?:me|lle)\.?)\s+([A-Za-zÀ-ÿ\s\-]{3,40})',
-    ]
+    # Arabic: تاريخ الولادة 25 سبتمبر 2001
+    ar_dob = re.search(r'تاريخ\s*(?:الولادة|الميلاد)\s+(\d{1,2})\s+(\S+)\s+(\d{4})', text)
+    if ar_dob:
+        day, month_ar, year = ar_dob.group(1), ar_dob.group(2), ar_dob.group(3)
+        month_num = AR_MONTHS.get(month_ar, "00")
+        if month_num != "00":
+            result["cin_date_of_birth"] = f"{day.zfill(2)}/{month_num}/{year}"
+
+    # French: née le 25/09/2001 | date de naissance: 25/09/2001
+    if not result["cin_date_of_birth"]:
+        fr_patterns = [
+            r'n[ée]e?\s+le\s+(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})',
+            r'date\s+de\s+naissance\s*:?\s*(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})',
+        ]
+        for p in fr_patterns:
+            m = re.search(p, text, re.IGNORECASE)
+            if m:
+                result["cin_date_of_birth"] = m.group(1)
+                break
+
+    # English: born: 25/09/2001 | date of birth: 25/09/2001
+    if not result["cin_date_of_birth"]:
+        en_patterns = [
+            r'(?:born|date\s+of\s+birth)\s*:?\s*(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})',
+        ]
+        for p in en_patterns:
+            m = re.search(p, text, re.IGNORECASE)
+            if m:
+                result["cin_date_of_birth"] = m.group(1)
+                break
+
+    # Generic fallback: any dd/mm/yyyy
+    if not result["cin_date_of_birth"]:
+        m = re.search(r'(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{4})', text)
+        if m:
+            result["cin_date_of_birth"] = m.group(1)
+
+    # ---- 3. Name ----
     result["name"] = None
-    for i, pattern in enumerate(name_patterns):
-        name_match = re.search(pattern, text, re.IGNORECASE)
-        if name_match:
-            if i == 1 and name_match.group(2):
-                # "Nom: X Prénom: Y" → "Y X" (first last)
-                result["name"] = f"{name_match.group(2).strip()} {name_match.group(1).strip()}"
-            else:
-                result["name"] = name_match.group(1).strip()
-            break
 
-    # 4. Extract address
-    address_patterns = [
-        r'(?:adresse|address|domicile)\s*:?\s*(.+?)(?:\n|$)',
-        r'(?:r[ée]sidant\s+[àa]|demeurant\s+[àa])\s*(.+?)(?:\n|$)',
-    ]
+    # Arabic: اللقب العمري / الاسم نور
+    ar_laqab = re.search(r'اللقب\s+(\S+)', text)
+    ar_ism = re.search(r'الاسم\s+(\S+)', text)
+    if ar_laqab and ar_ism:
+        result["name"] = f"{ar_ism.group(1)} {ar_laqab.group(1)}"
+
+    # Arabic alt: الاسم واللقب نور العمري
+    if not result["name"]:
+        m = re.search(r'الاسم\s+واللقب\s+(.+?)(?:\n|$)', text)
+        if m:
+            result["name"] = m.group(1).strip()
+
+    # French: Nom: OMRI\nPrénom: NOUR
+    if not result["name"]:
+        m = re.search(r'nom\s*:?\s*([A-Za-zÀ-ÿ\-]+)\s*[\n,;]\s*pr[ée]nom\s*:?\s*([A-Za-zÀ-ÿ\-]+)', text, re.IGNORECASE)
+        if m:
+            result["name"] = f"{m.group(2).strip()} {m.group(1).strip()}"
+
+    # French: Nom et Prénom: NOUR OMRI
+    if not result["name"]:
+        m = re.search(r'nom\s+et\s+pr[ée]nom\s*:?\s*([A-Za-zÀ-ÿ\s\-]{3,40})', text, re.IGNORECASE)
+        if m:
+            result["name"] = m.group(1).strip()
+
+    # English: Name: NOUR OMRI | Full Name: NOUR OMRI
+    if not result["name"]:
+        m = re.search(r'(?:full\s+)?name\s*:?\s*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ \-]{1,38})', text, re.IGNORECASE)
+        if m:
+            result["name"] = m.group(1).strip()
+
+    # ---- 4. Address ----
     result["home_address"] = None
-    for pattern in address_patterns:
-        addr_match = re.search(pattern, text, re.IGNORECASE)
-        if addr_match:
-            result["home_address"] = addr_match.group(1).strip()
-            break
 
-    # 5. Quality assessment
+    # Arabic: عنوانها القصرين | العنوان القصرين
+    ar_addr = re.search(r'(?:عنوانها|العنوان)\s+(.+?)(?:\n|$)', text)
+    if ar_addr:
+        result["home_address"] = ar_addr.group(1).strip()
+
+    # French: Adresse: Kasserine | Domicile: Kasserine
+    if not result["home_address"]:
+        m = re.search(r'(?:adresse|domicile)\s*:?\s*(.+?)(?:\n|$)', text, re.IGNORECASE)
+        if m:
+            result["home_address"] = m.group(1).strip()
+
+    # English: Address: Kasserine
+    if not result["home_address"]:
+        m = re.search(r'address\s*:?\s*(.+?)(?:\n|$)', text, re.IGNORECASE)
+        if m:
+            result["home_address"] = m.group(1).strip()
+
+    # ---- 5. Quality Assessment ----
     fields_found = sum(1 for k in ["cin_national_id", "cin_date_of_birth", "name", "home_address"]
                        if result.get(k) is not None)
     result["fields_extracted"] = fields_found
@@ -248,25 +486,26 @@ def parse_cin_card(extracted_text: str) -> Dict[str, Any]:
     return result
 
 
+# ---------------------------------------------------------------
+# CIN Cross-Check
+# ---------------------------------------------------------------
+
 @tool
 def cross_check_cin(typed_national_id: str, cin_national_id: str,
                     typed_dob: str = None, cin_dob: str = None) -> Dict[str, Any]:
     """Cross-check user-typed identity data against CIN card extracted data.
 
-    Compares:
-      - National ID: exact match (8-digit string)
-      - Date of birth: fuzzy date match (handles format differences)
-
-    Returns a dict with match results and a fraud_flag boolean.
+    Compares national ID (exact match) and date of birth (fuzzy date match).
+    Returns match results and a fraud_flag boolean.
     """
     result = {
         "id_match": False,
-        "dob_match": None,  # None = not checked (missing data)
+        "dob_match": None,
         "fraud_flag": False,
         "mismatches": [],
     }
 
-    # 1. National ID check (critical)
+    # National ID check
     typed_clean = str(typed_national_id).strip()
     cin_clean = str(cin_national_id).strip()
 
@@ -279,9 +518,8 @@ def cross_check_cin(typed_national_id: str, cin_national_id: str,
             f"National ID mismatch: typed '{typed_clean}' vs CIN '{cin_clean}'"
         )
 
-    # 2. Date of birth check (if both available)
+    # Date of birth check
     if typed_dob and cin_dob:
-        # Normalize dates: strip separators, compare digits
         def normalize_date(d: str) -> str:
             return re.sub(r'[/\-\.\s]', '', d.strip())
 
@@ -294,63 +532,3 @@ def cross_check_cin(typed_national_id: str, cin_national_id: str,
             )
 
     return result
-
-
-# ---------------------------------------------------------------
-# OCR Fallback for Scanned Documents
-# ---------------------------------------------------------------
-
-@tool
-def ocr_extract_text(file_path: str) -> Dict[str, Any]:
-    """Extract text from a scanned PDF or image using OCR (Tesseract).
-
-    Fallback when regular text extraction returns empty/short text.
-    Supports: PDF (rasterizes pages), PNG, JPG, TIFF.
-    Languages: French + Arabic (common on Tunisian documents).
-    """
-    if not os.path.exists(file_path):
-        return {"success": False, "error": f"File not found: {file_path}"}
-
-    if not TESSERACT_AVAILABLE:
-        return {
-            "success": False,
-            "error": "OCR not available. Install: pip install pytesseract Pillow, plus Tesseract system package.",
-        }
-
-    try:
-        ext = os.path.splitext(file_path)[1].lower()
-        ocr_text = ""
-
-        if ext == ".pdf":
-            # Rasterize PDF pages to images, then OCR each
-            if fitz is None:
-                return {"success": False, "error": "PyMuPDF needed for PDF OCR. pip install pymupdf"}
-
-            doc = fitz.open(file_path)
-            for page_num, page in enumerate(doc):
-                # Render page at 300 DPI for good OCR quality
-                pix = page.get_pixmap(dpi=300)
-                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                page_text = pytesseract.image_to_string(img, lang="fra+ara")
-                ocr_text += page_text + "\n"
-            doc.close()
-
-        elif ext in (".png", ".jpg", ".jpeg", ".tiff", ".tif"):
-            img = Image.open(file_path)
-            ocr_text = pytesseract.image_to_string(img, lang="fra+ara")
-
-        else:
-            return {"success": False, "error": f"Unsupported file type for OCR: {ext}"}
-
-        if ocr_text.strip():
-            return {
-                "success": True,
-                "text": ocr_text.strip(),
-                "method": "tesseract_ocr",
-                "languages": "fra+ara",
-            }
-        else:
-            return {"success": False, "error": "OCR produced no text. Image quality may be too low."}
-
-    except Exception as e:
-        return {"success": False, "error": f"OCR failed: {str(e)}"}
