@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  body        { font-family: Arial, sans-serif; font-size: 13px; color: #263238; margin: 60px; }
+  .header     { border-bottom: 2px solid #00838F; padding-bottom: 16px; margin-bottom: 24px; }
+  .bank-name  { font-size: 22px; font-weight: bold; color: #2E4057; }
+  .subtitle   { color: #00838F; font-size: 13px; }
+  .ref        { color: #888; font-size: 12px; margin-top: 4px; }
+  h2          { color: #2E4057; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+  .approved   { color: #2e7d32; font-weight: bold; font-size: 16px; }
+  .rejected   { color: #c62828; font-weight: bold; font-size: 16px; }
+  .conditional{ color: #e65100; font-weight: bold; font-size: 16px; }
+  table       { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  td          { padding: 8px 12px; border-bottom: 1px solid #eee; }
+  td:first-child { color: #546E7A; width: 40%; }
+  .footer     { margin-top: 40px; border-top: 1px solid #eee; padding-top: 12px; color: #888; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="bank-name">AXE Finance</div>
+  <div class="subtitle">Loan Application Decision</div>
+  <div class="ref">Reference: {{ application_id }} &nbsp;|&nbsp; Date: {{ decision_date }}</div>
+</div>
+
+<p>Dear {{ name }},</p>
+<p>Thank you for submitting your loan application. We have completed our assessment and are pleased to inform you of our decision.</p>
+
+<h2>Decision</h2>
+<p class="{{ decision }}">
+  {% if decision == 'approved' %}&check; APPROVED
+  {% elif decision == 'conditional' %}&#9888; CONDITIONALLY APPROVED
+  {% else %}&cross; NOT APPROVED
+  {% endif %}
+</p>
+
+{% if decision == 'approved' %}
+<h2>Loan Offer Details</h2>
+<table>
+  <tr><td>Approved Amount</td><td>{{ offered_amount | round(0) | int }} {{ preferred_currency }}</td></tr>
+  <tr><td>Interest Rate</td><td>{{ (interest_rate * 100) | round(2) }}% per annum (fixed)</td></tr>
+  <tr><td>Loan Term</td><td>{{ offered_term_months }} months</td></tr>
+  <tr><td>Estimated Monthly Payment</td><td>{{ monthly_payment | round(2) }} {{ preferred_currency }}</td></tr>
+</table>
+<p>To accept this offer please visit your nearest branch or contact your advisor within 30 days.</p>
+{% endif %}
+
+{% if decision == 'conditional' %}
+<h2>Conditions</h2>
+<p>Your application has been conditionally approved subject to the following requirements:</p>
+<ul>
+  {% for condition in conditions %}
+  <li>{{ condition }}</li>
+  {% endfor %}
+</ul>
+<h2>Conditional Offer Details</h2>
+<table>
+  <tr><td>Conditionally Approved Amount</td><td>{{ offered_amount | round(0) | int }} {{ preferred_currency }}</td></tr>
+  <tr><td>Interest Rate</td><td>{{ (interest_rate * 100) | round(2) }}% per annum (fixed)</td></tr>
+  <tr><td>Loan Term</td><td>{{ offered_term_months }} months</td></tr>
+  <tr><td>Estimated Monthly Payment</td><td>{{ monthly_payment | round(2) }} {{ preferred_currency }}</td></tr>
+</table>
+<p>Please contact your bank advisor to fulfil these conditions and proceed with your application.</p>
+{% endif %}
+
+{% if decision == 'rejected' %}
+<h2>Reason</h2>
+<p>After careful review, we are unable to approve your application at this time.</p>
+<ul>
+  {% for code in reason_codes %}
+  <li>{{ code | replace('_', ' ') | title }}</li>
+  {% endfor %}
+</ul>
+<p>You are welcome to reapply after 6 months. For guidance on improving your application, please speak with a bank advisor.</p>
+{% endif %}
+
+<h2>Application Summary</h2>
+<table>
+  <tr><td>Applicant</td><td>{{ name }}</td></tr>
+  <tr><td>Loan Type</td><td>{{ loan_type | title }}</td></tr>
+  <tr><td>Amount Requested</td><td>{{ loan_amount | round(0) | int }} {{ preferred_currency }}</td></tr>
+  <tr><td>Purpose</td><td>{{ loan_purpose_category | default('General', true) | replace('_', ' ') | title }}</td></tr>
+  <tr><td>Application ID</td><td>{{ application_id }}</td></tr>
+</table>
+
+<div class="footer">
+  This letter is an official communication from AXE Finance.<br>
+  If you have questions, please contact your bank advisor quoting reference {{ application_id }}.
+</div>
+
+</body>
+</html>

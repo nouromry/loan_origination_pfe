@@ -1,0 +1,155 @@
+{
+  "application_id": "APP_DEB2B3D5",
+  "status": "documents_processed",
+  "created_at": "2026-03-18T11:18:26.167988",
+  "updated_at": "2026-03-18T11:22:10.644563",
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "Hello! Welcome to AXE Finance. I'm your AI loan assistant. How can I help you today?",
+      "intent": null,
+      "timestamp": "2026-03-18T11:18:26.167988"
+    },
+    {
+      "role": "user",
+      "content": "business",
+      "intent": "provide_data",
+      "timestamp": "2026-03-18T11:18:26.171121"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello there! It seems you mentioned a business. That's quite interesting! To help me better assist you today, could you please tell me what your full name is? I look forward to getting to know you better!",
+      "intent": null,
+      "timestamp": "2026-03-18T11:18:49.246437"
+    },
+    {
+      "role": "user",
+      "content": "50000",
+      "intent": "provide_data",
+      "timestamp": "2026-03-18T11:18:49.251629"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello there! I've noted that you mentioned a sum of 50,000. That sounds interesting! To help you better, could you please tell me your full name?",
+      "intent": null,
+      "timestamp": "2026-03-18T11:19:16.010690"
+    },
+    {
+      "role": "user",
+      "content": "I need it for restaurant expansion",
+      "intent": "provide_data",
+      "timestamp": "2026-03-18T11:19:16.013686"
+    },
+    {
+      "role": "assistant",
+      "content": "Hi there! It's great to hear that you're considering expanding your restaurant. To help us better understand your needs and find the right financing solution for you, could you please share your full name with me?",
+      "intent": null,
+      "timestamp": "2026-03-18T11:19:46.110605"
+    },
+    {
+      "role": "user",
+      "content": "36 months",
+      "intent": "provide_data",
+      "timestamp": "2026-03-18T11:19:46.114604"
+    },
+    {
+      "role": "assistant",
+      "content": "Great! So you mentioned a loan term of 36 months. That's fantastic! To proceed further, I just need one more piece of information from you - your national ID number (8 digits). Could you please provide that?",
+      "intent": null,
+      "timestamp": "2026-03-18T11:20:14.162506"
+    },
+    {
+      "role": "user",
+      "content": "Ahmed Ben Salem",
+      "intent": "provide_data",
+      "timestamp": "2026-03-18T11:20:14.166508"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello Ahmed Ben Salem! I'm delighted to assist you today at AXE Finance. Could you please provide me with your eight-digit national ID number to help me better understand your financial situation and serve you more effectively?",
+      "intent": null,
+      "timestamp": "2026-03-18T11:20:33.072438"
+    },
+    {
+      "role": "user",
+      "content": "12345678",
+      "intent": "provide_data",
+      "timestamp": "2026-03-18T11:20:33.076019"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello there! I see you've provided a phone number. That's great! To help you better, could you please share your email address as well? It would make our communication more efficient. Looking forward to hearing from you soon! (your.name@example.com)",
+      "intent": null,
+      "timestamp": "2026-03-18T11:20:56.506572"
+    },
+    {
+      "role": "user",
+      "content": "ahmed@gmail.com",
+      "intent": "provide_data",
+      "timestamp": "2026-03-18T11:20:56.511564"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello Ahmed! Thanks for providing your email address. I'm one step closer to getting started on your loan application. To help me move forward, could you please share your phone number as well? It should be an 8-digit number like 98765432.",
+      "intent": null,
+      "timestamp": "2026-03-18T11:21:21.595447"
+    },
+    {
+      "role": "user",
+      "content": "98765432",
+      "intent": "provide_data",
+      "timestamp": "2026-03-18T11:21:21.599998"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello there! It seems like you've provided some information already. That's great! Now, to better understand your financial situation, could you please tell me about your monthly income (in TND)? I appreciate your cooperation.",
+      "intent": null,
+      "timestamp": "2026-03-18T11:21:42.254646"
+    },
+    {
+      "role": "user",
+      "content": "3000",
+      "intent": "provide_data",
+      "timestamp": "2026-03-18T11:21:42.259717"
+    },
+    {
+      "role": "assistant",
+      "content": "Delighted to hear from you! With the last field complete, we now have a full picture of your application. To move forward, could you please upload your financial documents such as an income statement, bank statements (preferably for the past 3-6 months), and a balance sheet if applicable? I have all your information!",
+      "intent": null,
+      "timestamp": "2026-03-18T11:22:10.625758"
+    },
+    {
+      "role": "user",
+      "content": "I have uploaded my documents",
+      "intent": "upload_document",
+      "timestamp": "2026-03-18T11:22:10.646014"
+    },
+    {
+      "role": "assistant",
+      "content": "The message does not contain a person's name., Excellent job! All 3 business loan documents were processed without errors or warnings.\n\nThe issues are minor and we can proceed if you'd like. Shall I continue with your application?",
+      "intent": null,
+      "timestamp": "2026-03-18T11:26:14.982672"
+    }
+  ],
+  "current_intent": "upload_document",
+  "response": "The message does not contain a person's name., Excellent job! All 3 business loan documents were processed without errors or warnings.\n\nThe issues are minor and we can proceed if you'd like. Shall I continue with your application?",
+  "name": "The message does not contain a person's name.",
+  "national_id": "12345678",
+  "email": "ahmed@gmail.com",
+  "phone": "98765432",
+  "loan_amount": 50000.0,
+  "loan_term_months": 36,
+  "loan_type": "business",
+  "loan_purpose": "Restaurant Expansion",
+  "monthly_income": 3000.0,
+  "credit_score": null,
+  "documents_uploaded": true,
+  "agent_2_result": null,
+  "agent_3_result": null,
+  "agent_4_result": null,
+  "agent_5_result": null,
+  "agent_6_result": null,
+  "next_agent": null,
+  "error": null,
+  "validation_errors": null
+}

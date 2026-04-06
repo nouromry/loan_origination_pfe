@@ -1,0 +1,111 @@
+# config/settings.yaml
+
+# ---------------------------------------------------------------
+# HYBRID LLM STRATEGY
+# ---------------------------------------------------------------
+# provider: "ollama" = local (PII safe) | "groq" = cloud (fast, no PII)
+#
+# RULE: Anything that touches user data → ollama (stays on-premise)
+#       Anything that only sees anonymized ratios/policies → groq (speed)
+# ---------------------------------------------------------------
+
+ollama:
+  base_url:  http://localhost:11434
+  # Models you have installed locally:
+  #   llama3.1:8b  (4.9 GB) — fast, good for extraction/classification
+  #   mistral:7b   (4.4 GB) — good for reasoning/document analysis
+
+# config/settings.yaml (Update this specific section)
+
+models:
+  triage:
+    provider: groq            # SWITCHED TO CLOUD FOR SPEED
+    model:    llama-3.1-8b-instant
+    reason:   "Runs on every single message. Must be lightning fast to avoid blocking the app."
+
+  collect:
+    provider: ollama
+    model:    llama3.1:8b
+    reason:   "Extracts national IDs, emails, phones — direct PII"
+
+  document:
+    provider: ollama
+    model:    mistral:7b
+    reason:   "Reads CIN cards, salary slips, bank statements — heavy PII"
+
+  scoring:
+    provider: ollama
+    model:    llama3.1:8b
+    reason:   "Sees income, loan amounts — financial PII"
+
+  decision:
+    provider: ollama
+    model:    mistral:7b
+    reason:   "Sees everything combined — maximum PII exposure"
+
+  responder:
+    provider: groq            # SWITCHED TO CLOUD FOR SPEED
+    model:    llama-3.1-8b-instant
+    reason:   "Handles all user-facing chat. Groq ensures natural, real-time conversational speed."
+
+  risk_assessment:
+    provider: groq
+    model:    llama-3.3-70b-versatile
+    reason:   "Only sees anonymized ratios + industry benchmarks — no PII"
+
+  policy:
+    provider: groq
+    model:    llama-3.1-8b-instant
+    reason:   "Only queries generic bank policies — no customer data"
+
+    
+thresholds:
+  dti_max:                0.45
+  dscr_min:               1.25
+  current_ratio_min:      1.0
+  debt_to_equity_max:     2.0
+  net_profit_margin_min:  0.10
+  quick_ratio_min:        0.80
+  doc_quality_min:        0.70
+  credit_score_min:       600
+  borderline_margin:      0.10
+
+rates:
+  base_rate:              0.085
+  low_risk_spread:        0.005
+  medium_risk_spread:     0.020
+  high_risk_spread:       0.040
+  personal_adjustment:    0.010
+
+compliance_tiers:
+  personal:
+    max_amount:  null
+    documents:   [cin_card, salary_slip, bank_statement]
+  small:
+    max_amount:  50000
+    documents:   [cin_card, bank_statement, business_registration, income_statement]
+  medium:
+    max_amount:  200000
+    documents:   [cin_card, bank_statement, business_registration, income_statement, balance_sheet, tax_return]
+  large:
+    max_amount:  500000
+    documents:   [cin_card, bank_statement, business_registration, income_statement, balance_sheet, tax_return, collateral_appraisal]
+  very_large:
+    max_amount:  null
+    documents:   [cin_card, bank_statement, business_registration, income_statement, balance_sheet, tax_return, collateral_appraisal, business_plan]
+
+api:
+  scoring_endpoint:      ${SCORING_API_URL}
+  credit_score_endpoint: ${CREDIT_SCORE_API_URL}
+  timeout_seconds:       30
+  retry_attempts:        2
+
+chromadb:
+  path:                  ./storage/chromadb
+  policy_collection:     loan_policies
+  benchmark_collection:  industry_benchmarks
+
+storage:
+  temp_uploads:          ./temp_uploads
+  letters_output:        ./storage/letters
+  pdf_template:          ./templates/decision_letter.html

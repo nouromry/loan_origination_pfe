@@ -1,0 +1,209 @@
+{
+  "application_id": "APP_C464B06A",
+  "status": "collecting_data",
+  "created_at": "2026-03-27T09:06:06.346197",
+  "updated_at": "2026-03-27T09:36:33.419679",
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "Hello! Welcome to AXE Finance. I'm your AI loan assistant. How can I help you today?",
+      "intent": null,
+      "timestamp": "2026-03-27T09:06:06.347199"
+    },
+    {
+      "role": "user",
+      "content": "HELLO i need a loan",
+      "intent": "greeting",
+      "timestamp": "2026-03-27T09:06:14.638540"
+    },
+    {
+      "role": "assistant",
+      "content": "Welcome to AXE Finance! I'm your loan application assistant. I'll guide you through a quick application. Is this loan for personal or business use?",
+      "intent": "greeting",
+      "timestamp": "2026-03-27T09:06:15.293674"
+    },
+    {
+      "role": "user",
+      "content": "personal",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:06:38.442253"
+    },
+    {
+      "role": "assistant",
+      "content": "Understood. What's your full name?",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:06:39.100980"
+    },
+    {
+      "role": "user",
+      "content": "Nour omri",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:06:49.214927"
+    },
+    {
+      "role": "assistant",
+      "content": "Great, I have that. What's your national ID number? (8 digits)",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:07:04.815721"
+    },
+    {
+      "role": "user",
+      "content": "12714074",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:07:18.892931"
+    },
+    {
+      "role": "assistant",
+      "content": "Perfect, noted. What's your email address? (e.g., your.name@example.com)",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:07:19.502029"
+    },
+    {
+      "role": "user",
+      "content": "nouromry@gmail.com",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:21:32.819997"
+    },
+    {
+      "role": "assistant",
+      "content": "Understood. What's your phone number? (8 digits, e.g., 98765432)",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:21:33.441364"
+    },
+    {
+      "role": "user",
+      "content": "58006533",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:21:41.680879"
+    },
+    {
+      "role": "assistant",
+      "content": "Great, I have that. How much would you like to borrow? (in TND)",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:21:42.219953"
+    },
+    {
+      "role": "user",
+      "content": "50K",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:21:48.750533"
+    },
+    {
+      "role": "assistant",
+      "content": "Perfect, noted. What will you use this loan for?",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:21:49.265751"
+    },
+    {
+      "role": "user",
+      "content": "buy a car i think",
+      "intent": "greeting",
+      "timestamp": "2026-03-27T09:22:01.398618"
+    },
+    {
+      "role": "assistant",
+      "content": " Hello there! It seems like you're considering getting a car loan. To help us determine the best options for you, could you please share your monthly income in Tunisian Dinar (TND)?",
+      "intent": "greeting",
+      "timestamp": "2026-03-27T09:22:28.829923"
+    },
+    {
+      "role": "user",
+      "content": "5000",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:28:33.081938"
+    },
+    {
+      "role": "assistant",
+      "content": " Congratulations on completing your application! To finalize your loan process, please upload your financial documents, including an income statement, bank statements (3-6 months), and a balance sheet for your business. I have all your information now.",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:28:53.391049"
+    },
+    {
+      "role": "user",
+      "content": "tell me about the interst rate here",
+      "intent": "ask_policy",
+      "timestamp": "2026-03-27T09:29:30.084769"
+    },
+    {
+      "role": "assistant",
+      "content": " The interest rates at AXE Finance range from 8% to 16%, depending on the level of risk associated with your loan application. I have all your information!",
+      "intent": "ask_policy",
+      "timestamp": "2026-03-27T09:29:55.912946"
+    },
+    {
+      "role": "user",
+      "content": "Do I need a guarantor?",
+      "intent": "ask_policy",
+      "timestamp": "2026-03-27T09:33:08.440529"
+    },
+    {
+      "role": "assistant",
+      "content": " For personal loans at AXE Finance, a guarantor is typically not required as they are usually unsecured. However, if you're applying for a business loan, there might be a possibility of requiring collateral and potentially a guarantor. I have all your information!",
+      "intent": "ask_policy",
+      "timestamp": "2026-03-27T09:33:35.223347"
+    },
+    {
+      "role": "user",
+      "content": "What is the minimum loan term?",
+      "intent": "ask_policy",
+      "timestamp": "2026-03-27T09:34:02.566409"
+    },
+    {
+      "role": "assistant",
+      "content": " The minimum loan term at AXE Finance is 12 months. I have all your information!",
+      "intent": "ask_policy",
+      "timestamp": "2026-03-27T09:34:25.610788"
+    },
+    {
+      "role": "user",
+      "content": "for a personal loan what documents i have to upload",
+      "intent": "ask_policy",
+      "timestamp": "2026-03-27T09:35:08.091948"
+    },
+    {
+      "role": "assistant",
+      "content": " For a personal loan, you need to upload National ID card, proof of income (3 months salary slips), bank statements (3 months), and proof of address. I have all your information!",
+      "intent": "ask_policy",
+      "timestamp": "2026-03-27T09:35:31.598811"
+    },
+    {
+      "role": "user",
+      "content": "bye",
+      "intent": "goodbye",
+      "timestamp": "2026-03-27T09:36:12.875093"
+    },
+    {
+      "role": "user",
+      "content": "application state",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:36:33.420083"
+    },
+    {
+      "role": "assistant",
+      "content": " Congratulations! Your loan application is now complete. To finalize the process, please upload your financial documents (income statement, bank statements for the past 3-6 months, and a balance sheet if you're a business owner). I have all your information!",
+      "intent": "provide_data",
+      "timestamp": "2026-03-27T09:36:48.920737"
+    }
+  ],
+  "current_intent": "provide_data",
+  "response": " Congratulations! Your loan application is now complete. To finalize the process, please upload your financial documents (income statement, bank statements for the past 3-6 months, and a balance sheet if you're a business owner). I have all your information!",
+  "name": "Nour Omri",
+  "national_id": "12714074",
+  "email": "nouromry@gmail.com",
+  "phone": "58006533",
+  "loan_amount": 50000.0,
+  "loan_term_months": 50,
+  "loan_type": "personal",
+  "loan_purpose": "Buy a car",
+  "monthly_income": 5000.0,
+  "credit_score": null,
+  "documents_uploaded": false,
+  "agent_2_result": null,
+  "agent_3_result": null,
+  "agent_4_result": null,
+  "agent_5_result": null,
+  "agent_6_result": null,
+  "next_agent": null,
+  "error": null,
+  "validation_errors": null
+}

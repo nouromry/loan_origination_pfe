@@ -1,0 +1,34 @@
+# requirements.txt — AXE Finance
+
+# Core LLM & Agent Framework
+langchain-groq
+langchain-core
+langchain-community
+langgraph
+
+# Vector Database (RAG)
+chromadb
+
+# Document Processing
+pymupdf
+pdfplumber
+pytesseract
+pillow
+
+# Configuration
+pyyaml
+python-dotenv
+
+# Decision Letter Rendering
+jinja2
+weasyprint
+
+# Database
+psycopg2-binary
+
+# Data Processing
+pandas
+requests
+
+# Test Document Generation
+reportlab

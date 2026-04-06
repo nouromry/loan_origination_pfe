@@ -1,0 +1,167 @@
+{
+  "application_id": "APP_8393A062",
+  "status": "collecting_data",
+  "created_at": "2026-03-19T14:33:05.034471",
+  "updated_at": "2026-03-19T14:39:55.141195",
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "Hello! Welcome to AXE Finance. I'm your AI loan assistant. How can I help you today?",
+      "intent": null,
+      "timestamp": "2026-03-19T14:33:05.034471"
+    },
+    {
+      "role": "user",
+      "content": "hi i need a loan",
+      "intent": "greeting",
+      "timestamp": "2026-03-19T14:33:21.572229"
+    },
+    {
+      "role": "assistant",
+      "content": "Welcome to AXE Finance! I'm your loan application assistant. I'll guide you through a quick application. Is this loan for personal or business use?",
+      "intent": "greeting",
+      "timestamp": "2026-03-19T14:33:22.164959"
+    },
+    {
+      "role": "user",
+      "content": "personal",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:33:33.202906"
+    },
+    {
+      "role": "assistant",
+      "content": "Great, I have that. What's your full name?",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:33:33.746365"
+    },
+    {
+      "role": "user",
+      "content": "nour omri",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:33:44.822749"
+    },
+    {
+      "role": "assistant",
+      "content": "Thanks for that. What's your national ID number? (8 digits)",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:33:57.370117"
+    },
+    {
+      "role": "user",
+      "content": "12714074",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:34:06.508370"
+    },
+    {
+      "role": "assistant",
+      "content": "Thanks for that. What's your email address? (e.g., your.name@example.com)",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:34:07.074778"
+    },
+    {
+      "role": "user",
+      "content": "nouromry@gmail.com",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:34:24.368782"
+    },
+    {
+      "role": "assistant",
+      "content": "Great, I have that. What's your phone number? (8 digits, e.g., 98765432)",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:34:24.929541"
+    },
+    {
+      "role": "user",
+      "content": "58006433",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:34:40.881337"
+    },
+    {
+      "role": "assistant",
+      "content": "Got it! How much would you like to borrow? (in TND)",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:34:41.444677"
+    },
+    {
+      "role": "user",
+      "content": "50K",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:34:46.639103"
+    },
+    {
+      "role": "assistant",
+      "content": "Great, I have that. What will you use this loan for?",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:34:47.241963"
+    },
+    {
+      "role": "user",
+      "content": "car",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:34:56.065413"
+    },
+    {
+      "role": "assistant",
+      "content": "Understood. What's your monthly income? (in TND)",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:35:02.079920"
+    },
+    {
+      "role": "user",
+      "content": "3000",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:35:11.491567"
+    },
+    {
+      "role": "assistant",
+      "content": " Congratulations! Your loan application is now complete. To finalize, please upload your financial documents - income statement, bank statements (3-6 months), and balance sheet for business. I have all your information!",
+      "intent": "provide_data",
+      "timestamp": "2026-03-19T14:35:26.551829"
+    },
+    {
+      "role": "user",
+      "content": "tell me about the credit score",
+      "intent": "ask_policy",
+      "timestamp": "2026-03-19T14:37:36.654469"
+    },
+    {
+      "role": "assistant",
+      "content": " A credit score is a numerical representation of your creditworthiness, ranging from 300 to 850. At AXE Finance, a minimum credit score of 600 is required, but for better loan terms, we recommend a score of 650 or higher, with scores of 750 or higher considered excellent. I have all your information!",
+      "intent": "ask_policy",
+      "timestamp": "2026-03-19T14:38:12.543641"
+    },
+    {
+      "role": "user",
+      "content": "application status",
+      "intent": "ask_status",
+      "timestamp": "2026-03-19T14:39:55.141195"
+    },
+    {
+      "role": "assistant",
+      "content": "**Application Progress: 100%**\n\n\u2713 All information collected\n\u23f3 Waiting for document upload\n\n**Next step:** Upload your financial documents",
+      "intent": "ask_status",
+      "timestamp": "2026-03-19T14:39:55.708910"
+    }
+  ],
+  "current_intent": "ask_status",
+  "response": "**Application Progress: 100%**\n\n\u2713 All information collected\n\u23f3 Waiting for document upload\n\n**Next step:** Upload your financial documents",
+  "name": "Nour Omri",
+  "national_id": "12714074",
+  "email": "nouromry@gmail.com",
+  "phone": "58006433",
+  "loan_amount": 50000.0,
+  "loan_term_months": 50,
+  "loan_type": "personal",
+  "loan_purpose": "Purchase of a car",
+  "monthly_income": 3000.0,
+  "credit_score": null,
+  "documents_uploaded": false,
+  "agent_2_result": null,
+  "agent_3_result": null,
+  "agent_4_result": null,
+  "agent_5_result": null,
+  "agent_6_result": null,
+  "next_agent": null,
+  "error": null,
+  "validation_errors": null
+}
