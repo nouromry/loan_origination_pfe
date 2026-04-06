@@ -492,7 +492,7 @@ def parse_cin_card(extracted_text: str) -> Dict[str, Any]:
 
 @tool
 def cross_check_cin(typed_national_id: str, cin_national_id: str,
-                    typed_dob: str = None, cin_dob: str = None) -> Dict[str, Any]:
+                    typed_dob: Optional[str] = None, cin_dob: Optional[str] = None) -> Dict[str, Any]:
     """Cross-check user-typed identity data against CIN card extracted data.
 
     Compares national ID (exact match) and date of birth (fuzzy date match).
