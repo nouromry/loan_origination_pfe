@@ -1,18 +1,4 @@
-# src/agents/decision_agent.py
 
-"""
-Decision Agent — Makes the final credit decision.
-
-DETERMINISTIC PIPELINE (overrides BaseAgent.run()):
-  1. apply_hard_rules tool → immediate reject if any fail
-  2. calculate_interest_rate tool → based on risk category
-  3. LLM writes explanation (the only LLM call)
-  4. render_decision_letter tool → HTML + PDF
-  5. save_application + save_decision tools → PostgreSQL
-
-Same pattern as RiskAssessmentAgent: tools are called deterministically,
-LLM only handles the qualitative writing.
-"""
 
 import json
 from typing import List, Dict, Any

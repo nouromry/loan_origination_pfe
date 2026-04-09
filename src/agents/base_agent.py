@@ -1,4 +1,3 @@
-# src/agents/base_agent.py
 
 import os
 import json
@@ -10,18 +9,6 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 
 class BaseAgent:
-    """
-    Parent class for all agents in AXE Finance.
-    
-    HYBRID LLM STRATEGY:
-    - Agents touching PII → Ollama (local, data never leaves the server)
-    - Agents with no PII  → Groq (cloud, fast 70B models)
-    
-    Provider routing is driven entirely by config/settings.yaml.
-    Switching an agent from local to cloud = changing one line in YAML.
-    """
-
-    # Cache for settings and prompts (loaded once per process)
     _settings_cache: Dict[str, Any] = None
     _prompts_cache: Dict[str, str] = None
 

@@ -1,18 +1,4 @@
-# src/agents/collect_agent.py
 
-"""
-Collect Agent — Extracts ONE field per message.
-
-HYBRID APPROACH (same pattern as RiskAssessment and Decision):
-  - Regex tools handle obvious fields (national_id, email, phone, amounts)
-  - LLM handles ambiguous fields (marital_status, housing_status, industry)
-  - No LLM call needed for ~70% of fields
-
-Tool-first extraction order:
-  1. Keyword match (loan_type only)
-  2. Regex tool match (national_id, email, phone, amounts, counts)
-  3. LLM one-shot extraction (date_of_birth, marital_status, housing, industry)
-"""
 
 import json
 import re

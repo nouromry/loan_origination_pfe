@@ -1,21 +1,6 @@
-# config/settings.yaml
-
-# ---------------------------------------------------------------
-# HYBRID LLM STRATEGY
-# ---------------------------------------------------------------
-# provider: "ollama" = local (PII safe) | "groq" = cloud (fast, no PII)
-#
-# RULE: Anything that touches user data → ollama (stays on-premise)
-#       Anything that only sees anonymized ratios/policies → groq (speed)
-# ---------------------------------------------------------------
 
 ollama:
   base_url:  http://localhost:11434
-  # Models you have installed locally:
-  #   llama3.1:8b  (4.9 GB) — fast, good for extraction/classification
-  #   mistral:7b   (4.4 GB) — good for reasoning/document analysis
-
-# config/settings.yaml (Update this specific section)
 
 models:
   triage:

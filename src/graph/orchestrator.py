@@ -1,15 +1,3 @@
-# src/graph/orchestrator.py
-
-"""
-LangGraph Orchestrator — The Brain of AXE Finance.
-
-This is NOT a pipeline. It reads the full GlobalState on every message
-and decides dynamically which node to run. The user can do anything
-in any order — the system adapts.
-
-Flow:
-    User message → triage → route() picks next node → node runs → responder → END
-"""
 
 from langgraph.graph import StateGraph, END
 from src.models.global_state import GlobalState
