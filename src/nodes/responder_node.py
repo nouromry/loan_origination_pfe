@@ -149,6 +149,34 @@ def _build_context_directive(state: GlobalState) -> str:
             )
 
     # ---------------------------------------------------------
+    # CASE 2.5: Vague policy announcement
+    # User said something like "I want to ask about bank policies"
+    # but didn't ask a specific question. Politely ask what they
+    # want to know — DO NOT invent any policy content.
+    # ---------------------------------------------------------
+    if intent == "vague_policy":
+        missing = get_fields_to_ask(state)
+        has_pending_app = bool(state.get("loan_type")) or len(missing) < 10
+
+        if has_pending_app and missing:
+            next_field = missing[0]
+            pending_note = (
+                f" They also have a pending application, so after they tell you what they want to know, "
+                f"you'll continue with their application (next pending field: {next_field.replace('_', ' ')})."
+            )
+        else:
+            pending_note = ""
+
+        return (
+            f"The user said they want to ask about bank policies but did NOT ask a specific question yet. "
+            f"Ask them politely and briefly what they want to know about. "
+            f"Give 3-4 example topics they could ask about, such as: interest rates, minimum credit score, "
+            f"required documents, or eligibility criteria.{pending_note}\n\n"
+            f"CRITICAL: DO NOT invent any policy content. DO NOT mention any specific rates, scores, "
+            f"or requirements. Just ask what they want to know. Keep it to 2-3 sentences."
+        )
+
+    # ---------------------------------------------------------
     # CASE 3: Documents just processed
     # ---------------------------------------------------------
     if state.get("document_result") and not state.get("scoring_result"):

@@ -1,16 +1,4 @@
-#!/usr/bin/env python3
-# api.py
-#
-# AXE Finance — FastAPI Backend
-#
-# Run:  uvicorn api:app --reload --host 0.0.0.0 --port 8000
-# Docs: http://localhost:8000/docs
-#
-# This is a thin REST API wrapper around the LangGraph multi-agent system.
-# State is stored in-memory by application_id. Each pipeline step is a
-# synchronous endpoint that returns when done. The chat endpoint always
-# works in parallel with pipeline endpoints (FastAPI handles concurrent
-# requests natively).
+
 
 import os
 import uuid
@@ -248,8 +236,10 @@ def create_application():
     PROGRESS_LOGS[app_id] = []
 
     greeting = (
-        "Hello! Welcome to AXE Finance. I'm your AI loan assistant. "
-        "What type of loan are you looking for — personal or business?"
+        "Hello! Welcome to AXE Finance. Whether you're exploring your options "
+        "or ready to apply for a loan, I'm here to help. Feel free to ask me "
+        "anything about our loans and policies, or just tell me you want to "
+        "get started. How can I help?"
     )
 
     return CreateApplicationResponse(

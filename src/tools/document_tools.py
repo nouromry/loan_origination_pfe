@@ -369,11 +369,66 @@ def parse_cin_card(extracted_text: str) -> Dict[str, Any]:
 
     Supports Arabic, French, and English OCR output.
     Extracts: national_id (8 digits), name, date_of_birth, address.
+
+    Strategy:
+      1. Regex extraction first (fast, deterministic, works on clean text)
+      2. If regex finds < 3 fields, fall back to LLM extraction
+         (handles garbled OCR output, misread characters, weird spacing)
     """
     if not extracted_text or not extracted_text.strip():
         return {"success": False, "error": "Empty text — CIN card may need OCR"}
 
-    text = extracted_text.strip()
+    # Pre-normalize the text to handle common OCR issues
+    text = _normalize_ocr_text(extracted_text)
+
+    # Step 1: Try regex extraction
+    result = _parse_cin_regex(text)
+
+    # Step 2: If regex didn't find enough fields, try LLM fallback
+    fields_found = sum(1 for k in ["cin_national_id", "cin_date_of_birth", "name", "home_address"]
+                       if result.get(k) is not None)
+
+    if fields_found < 3:
+        print(f"[parse_cin_card] Regex found only {fields_found}/4 fields. Trying LLM fallback...")
+        llm_result = _parse_cin_llm(text)
+
+        if llm_result:
+            # Merge: prefer regex values (more reliable), fill gaps with LLM values
+            for key in ["cin_national_id", "cin_date_of_birth", "name", "home_address"]:
+                if result.get(key) is None and llm_result.get(key) is not None:
+                    result[key] = llm_result[key]
+                    print(f"[parse_cin_card] LLM filled: {key} = {llm_result[key]}")
+
+    # Recompute quality after potential LLM augmentation
+    fields_found = sum(1 for k in ["cin_national_id", "cin_date_of_birth", "name", "home_address"]
+                       if result.get(k) is not None)
+    result["fields_extracted"] = fields_found
+    result["extraction_quality"] = "good" if fields_found >= 3 else "partial" if fields_found >= 1 else "failed"
+    result["success"] = fields_found > 0
+
+    return result
+
+
+def _normalize_ocr_text(text: str) -> str:
+    """
+    Clean up common OCR artifacts before parsing.
+    - Collapse multiple whitespace into single spaces (but preserve newlines)
+    - Remove common OCR noise characters
+    - Fix common Arabic OCR substitutions
+    """
+    # Collapse runs of spaces/tabs (but keep newlines)
+    lines = text.split('\n')
+    cleaned_lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in lines]
+    text = '\n'.join(line for line in cleaned_lines if line)
+
+    # Remove common OCR noise: isolated punctuation runs
+    text = re.sub(r'[|_~`]{2,}', ' ', text)
+
+    return text
+
+
+def _parse_cin_regex(text: str) -> Dict[str, Any]:
+    """Regex-based CIN extraction — fast path for clean text."""
     result: Dict[str, Any] = {"success": True}
 
     # ---- 1. CIN Number (8 digits) — language-independent ----
@@ -477,13 +532,111 @@ def parse_cin_card(extracted_text: str) -> Dict[str, Any]:
         if m:
             result["home_address"] = m.group(1).strip()
 
-    # ---- 5. Quality Assessment ----
-    fields_found = sum(1 for k in ["cin_national_id", "cin_date_of_birth", "name", "home_address"]
-                       if result.get(k) is not None)
-    result["fields_extracted"] = fields_found
-    result["extraction_quality"] = "good" if fields_found >= 3 else "partial" if fields_found >= 1 else "failed"
-
+    # ---- 5. Return (quality assessment done by parent parse_cin_card) ----
     return result
+
+
+def _parse_cin_llm(text: str) -> Optional[Dict[str, Any]]:
+    """
+    LLM fallback for CIN extraction.
+    Used when regex fails on garbled OCR output.
+    Returns None if LLM is unavailable or parsing fails.
+    """
+    try:
+        # Lazy import to avoid circular dependency at module load time
+        from src.agents.base_agent import BaseAgent
+        import json as _json
+        from langchain_core.messages import SystemMessage, HumanMessage
+
+        # Use the document agent's LLM (local Ollama for PII safety)
+        settings = BaseAgent._load_settings()
+        model_config = settings.get("models", {}).get("document", {})
+        if isinstance(model_config, str):
+            provider, model = "ollama", model_config
+        else:
+            provider = model_config.get("provider", "ollama")
+            model = model_config.get("model", "mistral:7b")
+
+        llm = BaseAgent._create_llm(provider, model)
+
+        system_prompt = (
+            "You are an expert at reading Tunisian national ID cards (CIN) from noisy OCR output.\n"
+            "The text may be garbled, have misread characters, mixed Arabic/French, or wrong spacing.\n"
+            "Your job: extract exactly 4 fields and return them as JSON.\n\n"
+            "STRICT RULES:\n"
+            "- Return ONLY a JSON object: { \"cin_national_id\": ..., \"cin_date_of_birth\": ..., "
+            "\"name\": ..., \"home_address\": ... }\n"
+            "- cin_national_id: exactly 8 digits (Tunisian CIN format)\n"
+            "- cin_date_of_birth: format as DD/MM/YYYY\n"
+            "- name: full name in 'FirstName LastName' order (English transliteration if Arabic)\n"
+            "- home_address: city/region name\n"
+            "- Use null for any field you cannot confidently extract\n"
+            "- Do NOT guess. If unsure, return null.\n"
+            "- Do NOT add any text before or after the JSON object."
+        )
+
+        user_prompt = (
+            f"OCR text from CIN card:\n"
+            f"--- START ---\n{text[:2000]}\n--- END ---\n\n"
+            f"JSON output:"
+        )
+
+        response = llm.invoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ])
+
+        raw = response.content.strip()
+
+        # Strip markdown code fences if present
+        match = re.search(r'```(?:json)?\s*(.*?)\s*```', raw, re.DOTALL)
+        if match:
+            raw = match.group(1).strip()
+
+        # Find the first JSON object in the response
+        brace_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', raw, re.DOTALL)
+        if brace_match:
+            raw = brace_match.group(0)
+
+        parsed = _json.loads(raw)
+
+        if not isinstance(parsed, dict):
+            return None
+
+        # Normalize and validate
+        result: Dict[str, Any] = {}
+
+        # cin_national_id: must be exactly 8 digits
+        cin_id = parsed.get("cin_national_id")
+        if cin_id and isinstance(cin_id, (str, int)):
+            cin_id_str = re.sub(r'\D', '', str(cin_id))
+            if len(cin_id_str) == 8:
+                result["cin_national_id"] = cin_id_str
+
+        # cin_date_of_birth: must look like a date
+        dob = parsed.get("cin_date_of_birth")
+        if dob and isinstance(dob, str):
+            dob_match = re.search(r'(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{2,4})', dob)
+            if dob_match:
+                d, m, y = dob_match.groups()
+                y_full = y if len(y) == 4 else ("19" + y if int(y) > 30 else "20" + y)
+                result["cin_date_of_birth"] = f"{d.zfill(2)}/{m.zfill(2)}/{y_full}"
+
+        # name: any non-empty string
+        name = parsed.get("name")
+        if name and isinstance(name, str) and 2 < len(name.strip()) < 100:
+            result["name"] = name.strip()
+
+        # home_address: any non-empty string
+        addr = parsed.get("home_address")
+        if addr and isinstance(addr, str) and 2 < len(addr.strip()) < 200:
+            result["home_address"] = addr.strip()
+
+        return result if result else None
+
+    except Exception as e:
+        print(f"[parse_cin_llm] Fallback failed: {e}")
+        return None
 
 
 # ---------------------------------------------------------------
@@ -492,7 +645,8 @@ def parse_cin_card(extracted_text: str) -> Dict[str, Any]:
 
 @tool
 def cross_check_cin(typed_national_id: str, cin_national_id: str,
-                    typed_dob: Optional[str] = None, cin_dob: Optional[str] = None) -> Dict[str, Any]:
+                    typed_dob: Optional[str] = None,
+                    cin_dob: Optional[str] = None) -> Dict[str, Any]:
     """Cross-check user-typed identity data against CIN card extracted data.
 
     Compares national ID (exact match) and date of birth (fuzzy date match).
@@ -505,9 +659,14 @@ def cross_check_cin(typed_national_id: str, cin_national_id: str,
         "mismatches": [],
     }
 
-    # National ID check
-    typed_clean = str(typed_national_id).strip()
-    cin_clean = str(cin_national_id).strip()
+    # National ID check (handle None values)
+    typed_clean = str(typed_national_id or "").strip()
+    cin_clean = str(cin_national_id or "").strip()
+
+    if not typed_clean or not cin_clean:
+        result["id_match"] = None
+        result["mismatches"].append("Cannot cross-check: missing CIN ID extraction")
+        return result
 
     if typed_clean == cin_clean:
         result["id_match"] = True
@@ -518,7 +677,7 @@ def cross_check_cin(typed_national_id: str, cin_national_id: str,
             f"National ID mismatch: typed '{typed_clean}' vs CIN '{cin_clean}'"
         )
 
-    # Date of birth check
+    # Date of birth check (only if both are present)
     if typed_dob and cin_dob:
         def normalize_date(d: str) -> str:
             return re.sub(r'[/\-\.\s]', '', d.strip())

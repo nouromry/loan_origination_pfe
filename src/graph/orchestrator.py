@@ -1,3 +1,15 @@
+# src/graph/orchestrator.py
+
+"""
+LangGraph Orchestrator — The Brain of AXE Finance.
+
+This is NOT a pipeline. It reads the full GlobalState on every message
+and decides dynamically which node to run. The user can do anything
+in any order — the system adapts.
+
+Flow:
+    User message → triage → route() picks next node → node runs → responder → END
+"""
 
 from langgraph.graph import StateGraph, END
 from src.models.global_state import GlobalState
@@ -18,6 +30,11 @@ def route(state: GlobalState) -> str:
 
     # 0.5. Status inquiry → straight to responder (no processing)
     if state.get("intent") == "ask_status":
+        return "responder"
+
+    # 0.6. Vague policy announcement ("I want to ask about policies" without a specific question)
+    #      → skip RAG, let responder ask for clarification
+    if state.get("intent") == "vague_policy":
         return "responder"
 
     # 1. Policy question → skip everything → answer and return
