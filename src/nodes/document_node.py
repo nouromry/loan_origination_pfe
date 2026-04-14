@@ -21,11 +21,21 @@ from src.models.global_state import GlobalState, add_thought
 from src.agents.document_agent import DocumentAgent
 from src.tools.document_tools import (
     extract_text,
+    extract_tables_as_markdown,
     ocr_extract_text,
     classify_document_type,
     parse_cin_card,
     cross_check_cin,
 )
+
+
+# Document types that commonly contain tables — these trigger table extraction
+TABULAR_DOC_TYPES = {
+    "bank_statement",
+    "income_statement",
+    "balance_sheet",
+    "tax_return",
+}
 
 
 # Minimum characters to consider text extraction successful
@@ -99,9 +109,20 @@ def document_node(state: GlobalState) -> GlobalState:
             cin_result = _process_cin_card(state, extracted_text, file_name)
             all_results[file_name] = {"type": "cin_card", "result": cin_result}
 
+        elif doc_type in ("unknown", None, ""):
+            # We don't know what this document is — DO NOT send it to the LLM
+            # (we'd get hallucinated financial data for a random document type)
+            add_thought(state, f"WARNING: Could not identify document type of {file_name}. Skipping extraction.")
+            all_results[file_name] = {
+                "type": "unknown",
+                "result": {"error": "Document type could not be identified"},
+            }
+
         else:
-            # Financial documents → delegate to agent's LLM
-            doc_result = _process_financial_doc(state, extracted_text, doc_type, file_name)
+            # Known financial document → delegate to agent's LLM
+            doc_result = _process_financial_doc(
+                state, extracted_text, doc_type, file_name, file_path
+            )
             all_results[file_name] = {"type": doc_type, "result": doc_result}
 
     # 3. Store combined result
@@ -109,6 +130,19 @@ def document_node(state: GlobalState) -> GlobalState:
 
     # 4. Cross-check CIN if we have both typed and extracted IDs
     _run_cross_checks(state)
+
+    # 5. Validate that we got everything we need from the documents
+    from src.models.global_state import validate_document_extraction
+    report = state.get("document_validation") or {}
+    report = validate_document_extraction(state)
+    state["document_validation"] = report
+
+    if report["has_issues"]:
+        state["application_status"] = "documents_incomplete"
+        add_thought(state, f"Document validation FAILED: {report['user_message']}")
+    else:
+        state["application_status"] = "documents_processed"
+        add_thought(state, "Document validation passed: all critical data extracted.")
 
     return state
 
@@ -138,15 +172,69 @@ def _process_cin_card(state: GlobalState, text: str, file_name: str) -> dict:
     return result
 
 
-def _process_financial_doc(state: GlobalState, text: str, doc_type: str, file_name: str) -> dict:
-    """Process a financial document using the DocumentAgent's LLM."""
+def _process_financial_doc(state: GlobalState, text: str, doc_type: str,
+                           file_name: str, file_path: str) -> dict:
+    """
+    Process a financial document using the DocumentAgent's LLM.
+    
+    For tabular document types (bank_statement, income_statement, balance_sheet,
+    tax_return), we first try to extract structured tables via pdfplumber and
+    feed them to the LLM as markdown. This gives the LLM much cleaner input
+    than raw flattened PDF text.
+    """
+    # Default: use the raw extracted text
+    llm_input = text
+    extraction_note = "raw text (PyMuPDF)"
+
+    # For tabular document types, try structured table extraction
+    if doc_type in TABULAR_DOC_TYPES:
+        try:
+            table_result = extract_tables_as_markdown.invoke({"file_path": file_path})
+
+            if table_result.get("success") and table_result.get("has_tables"):
+                tables_md = table_result.get("tables_markdown", "")
+                header_text = table_result.get("header_text", "")
+                table_count = table_result.get("table_count", 0)
+
+                # Combine header + tables for the LLM
+                # Header first (shorter context), then tables (main data)
+                parts = []
+                if header_text.strip():
+                    parts.append(f"--- DOCUMENT HEADER / NARRATIVE ---\n{header_text[:1500]}")
+                parts.append(f"--- EXTRACTED TABLES ({table_count} found) ---\n{tables_md}")
+                llm_input = "\n\n".join(parts)
+
+                extraction_note = f"structured tables ({table_count}) + header"
+                add_thought(
+                    state,
+                    f"Table extraction: found {table_count} tables in {file_name}, "
+                    f"feeding structured markdown to LLM."
+                )
+            else:
+                # Tables not found → fall back to raw text (already set above)
+                add_thought(
+                    state,
+                    f"Table extraction: no tables detected in {file_name}, using raw text."
+                )
+
+        except Exception as e:
+            # Graceful degradation — use raw text
+            add_thought(
+                state,
+                f"Table extraction failed for {file_name}: {str(e)[:80]}. Using raw text."
+            )
+
+    # Call the LLM with the best input we have
     agent = DocumentAgent()
     result = agent.run(
         goal=f"Extract all financial data from this {doc_type} document.",
         doc_type=doc_type,
         loan_type=state.get("loan_type", "unknown"),
-        extracted_text=text[:4000],  # Limit text to avoid token overflow
+        extracted_text=llm_input[:4500],  # Slightly higher limit for table content
     )
+
+    # Tag the result with the extraction method for debugging/reporting
+    result["_extraction_method"] = extraction_note
 
     # Pre-fill GlobalState from extracted values
     FIELD_MAP = {

@@ -37,6 +37,11 @@ def route(state: GlobalState) -> str:
     if state.get("intent") == "vague_policy":
         return "responder"
 
+    # 0.7. Document validation failed — ask user to re-upload or provide values
+    #      This catches missing critical fields, failed extractions, unknown docs
+    if state.get("application_status") == "documents_incomplete":
+        return "responder"
+
     # 1. Policy question → skip everything → answer and return
     if state.get("intent") == "policy_question":
         return "policy"

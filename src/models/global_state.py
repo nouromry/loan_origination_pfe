@@ -111,6 +111,147 @@ def get_fields_to_ask(state: dict) -> List[str]:
     return missing
 
 
+# ---------------------------------------------------------------
+# Document Validation — checks quality of extracted data
+# ---------------------------------------------------------------
+
+# Fields that MUST come from documents for scoring/decision to work
+CRITICAL_FIELDS_BY_LOAN_TYPE = {
+    "personal": {
+        "monthly_income": "Net monthly salary from your salary slip",
+        "monthly_cash_flow": "Monthly cash flow from your bank statement",
+    },
+    "business": {
+        "total_revenue": "Total revenue from your income statement",
+        "net_income": "Net income from your income statement",
+        "total_assets": "Total assets from your balance sheet",
+        "total_liabilities": "Total liabilities from your balance sheet",
+        "years_in_operation": "Years in operation from your business registration",
+    },
+}
+
+
+def validate_document_extraction(state: dict) -> dict:
+    """
+    Validate that document processing produced usable data.
+    
+    Checks three things:
+      1. Failed documents (couldn't be read at all)
+      2. Unknown document types (classifier didn't recognize them)
+      3. Critical fields missing (required for scoring/decision)
+    
+    Returns:
+        {
+            "has_issues": bool,
+            "failed_documents": [filename, ...],
+            "unknown_documents": [filename, ...],
+            "missing_critical_fields": [{"field": name, "description": text}, ...],
+            "expected_not_uploaded": [doc_type, ...],
+            "user_message": "...",   # human-readable summary
+        }
+    """
+    loan_type = state.get("loan_type", "personal")
+    tier = state.get("compliance_tier", "personal")
+    doc_result = state.get("document_result", {}) or {}
+
+    report = {
+        "has_issues": False,
+        "failed_documents": [],
+        "unknown_documents": [],
+        "missing_critical_fields": [],
+        "expected_not_uploaded": [],
+        "user_message": "",
+    }
+
+    # ---- Check 1: Failed / unknown documents ----
+    uploaded_types = set()
+    for fname, data in doc_result.items():
+        if not isinstance(data, dict):
+            continue
+        if data.get("error"):
+            report["failed_documents"].append(fname)
+            continue
+        doc_type = data.get("type")
+        if doc_type == "unknown" or doc_type is None:
+            report["unknown_documents"].append(fname)
+            continue
+        uploaded_types.add(doc_type)
+
+    # ---- Check 2: Critical fields missing ----
+    critical = CRITICAL_FIELDS_BY_LOAN_TYPE.get(loan_type, {})
+    for field, description in critical.items():
+        if state.get(field) is None:
+            report["missing_critical_fields"].append({
+                "field": field,
+                "description": description,
+            })
+
+    # ---- Check 3: Expected tier documents not uploaded ----
+    # We need the settings to know the tier requirements. Since we can't
+    # import BaseAgent here (circular), we hardcode the tier map.
+    TIER_DOCS = {
+        "personal": ["cin_card", "salary_slip", "bank_statement"],
+        "small": ["cin_card", "bank_statement", "business_registration", "income_statement"],
+        "medium": ["cin_card", "bank_statement", "business_registration",
+                   "income_statement", "balance_sheet", "tax_return"],
+        "large": ["cin_card", "bank_statement", "business_registration",
+                  "income_statement", "balance_sheet", "tax_return", "collateral_appraisal"],
+        "very_large": ["cin_card", "bank_statement", "business_registration",
+                       "income_statement", "balance_sheet", "tax_return",
+                       "collateral_appraisal", "business_plan"],
+    }
+    expected = TIER_DOCS.get(tier, TIER_DOCS["personal"])
+    for doc_type in expected:
+        if doc_type not in uploaded_types:
+            report["expected_not_uploaded"].append(doc_type)
+
+    # ---- Summary ----
+    report["has_issues"] = bool(
+        report["failed_documents"]
+        or report["unknown_documents"]
+        or report["missing_critical_fields"]
+        or report["expected_not_uploaded"]
+    )
+
+    # ---- Build a user-friendly message ----
+    lines = []
+    if report["failed_documents"]:
+        lines.append(
+            f"Could not read {len(report['failed_documents'])} document(s): "
+            f"{', '.join(report['failed_documents'])}. The file(s) may be corrupted, "
+            f"password-protected, or too blurry to process."
+        )
+    if report["unknown_documents"]:
+        lines.append(
+            f"Could not identify {len(report['unknown_documents'])} document(s): "
+            f"{', '.join(report['unknown_documents'])}. Please make sure you uploaded "
+            f"the correct document type."
+        )
+    if report["expected_not_uploaded"]:
+        doc_names = {
+            "cin_card": "CIN Card",
+            "salary_slip": "Salary Slip",
+            "bank_statement": "Bank Statement",
+            "business_registration": "Business Registration",
+            "income_statement": "Income Statement",
+            "balance_sheet": "Balance Sheet",
+            "tax_return": "Tax Return",
+            "collateral_appraisal": "Collateral Appraisal",
+            "business_plan": "Business Plan",
+        }
+        missing_names = [doc_names.get(d, d) for d in report["expected_not_uploaded"]]
+        lines.append(f"Missing required document(s): {', '.join(missing_names)}.")
+    if report["missing_critical_fields"]:
+        descriptions = [f["description"] for f in report["missing_critical_fields"]]
+        lines.append(
+            f"Could not find these key values in your documents: "
+            f"{'; '.join(descriptions)}."
+        )
+
+    report["user_message"] = " ".join(lines) if lines else "All documents processed successfully."
+    return report
+
+
 def compute_tier(state: dict) -> str:
     """
     Determine compliance tier from loan_type and loan_amount.

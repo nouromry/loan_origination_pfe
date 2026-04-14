@@ -177,6 +177,47 @@ def _build_context_directive(state: GlobalState) -> str:
         )
 
     # ---------------------------------------------------------
+    # CASE 2.8: Documents were processed but validation failed
+    # Missing critical fields, failed extraction, unknown type, etc.
+    # The user needs to either re-upload or provide missing values.
+    # ---------------------------------------------------------
+    if app_status == "documents_incomplete":
+        report = state.get("document_validation", {}) or {}
+        user_msg = report.get("user_message", "Some documents could not be processed.")
+        missing_fields = report.get("missing_critical_fields", [])
+        failed_docs = report.get("failed_documents", [])
+        unknown_docs = report.get("unknown_documents", [])
+        missing_docs = report.get("expected_not_uploaded", [])
+
+        # Build a directive that explains the issue and offers two options
+        field_list = ""
+        if missing_fields:
+            descriptions = [f"- {f['description']}" for f in missing_fields]
+            field_list = "\n".join(descriptions)
+
+        doc_issues = []
+        if failed_docs:
+            doc_issues.append(f"Could not read: {', '.join(failed_docs)}")
+        if unknown_docs:
+            doc_issues.append(f"Unrecognized: {', '.join(unknown_docs)}")
+        if missing_docs:
+            doc_issues.append(f"Missing required: {', '.join(missing_docs)}")
+        doc_issue_text = " | ".join(doc_issues) if doc_issues else ""
+
+        return (
+            f"DOCUMENT VALIDATION FAILED. You MUST tell the user there was a problem "
+            f"processing their documents. Do NOT proceed with scoring or decision.\n\n"
+            f"SPECIFIC ISSUES: {user_msg}\n"
+            f"DOCUMENT PROBLEMS: {doc_issue_text}\n"
+            f"MISSING VALUES:\n{field_list}\n\n"
+            f"Give the user TWO options clearly:\n"
+            f"1) Re-upload clearer/correct documents using the upload button in the sidebar.\n"
+            f"2) Provide the missing values directly in chat (e.g., 'my monthly income is 3169 TND').\n\n"
+            f"Be empathetic — documents can be tricky to read. Keep it to 4-5 sentences. "
+            f"Do NOT invent any numbers. Do NOT proceed to scoring."
+        )
+
+    # ---------------------------------------------------------
     # CASE 3: Documents just processed
     # ---------------------------------------------------------
     if state.get("document_result") and not state.get("scoring_result"):

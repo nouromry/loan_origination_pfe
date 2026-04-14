@@ -1,4 +1,16 @@
-
+#!/usr/bin/env python3
+# api.py
+#
+# AXE Finance — FastAPI Backend
+#
+# Run:  uvicorn api:app --reload --host 0.0.0.0 --port 8000
+# Docs: http://localhost:8000/docs
+#
+# This is a thin REST API wrapper around the LangGraph multi-agent system.
+# State is stored in-memory by application_id. Each pipeline step is a
+# synchronous endpoint that returns when done. The chat endpoint always
+# works in parallel with pipeline endpoints (FastAPI handles concurrent
+# requests natively).
 
 import os
 import uuid
@@ -163,6 +175,11 @@ def get_next_pipeline_step(state: dict) -> Optional[str]:
     if status in ("approved", "rejected", "blocked"):
         return None
 
+    # HALT: if documents failed validation, the pipeline must pause and
+    # wait for the user to re-upload or provide missing values via chat
+    if status == "documents_incomplete":
+        return None
+
     has_docs = state.get("documents_uploaded", False)
     has_doc_result = bool(state.get("document_result"))
     has_scoring = bool(state.get("scoring_result"))
@@ -312,10 +329,20 @@ def send_message(app_id: str, request: ChatMessageRequest):
     Send a chat message. The orchestrator handles routing.
     Works concurrently with pipeline endpoints — FastAPI handles
     concurrent requests independently.
+
+    Special case: if status is 'documents_incomplete', try to extract
+    missing critical field values from the user message BEFORE routing.
+    If we successfully fill a missing field, re-validate and possibly
+    unblock the pipeline.
     """
     state = get_application(app_id)
 
     try:
+        # ---- Manual fallback: recover missing fields from chat ----
+        if state.get("application_status") == "documents_incomplete":
+            state = _try_recover_missing_fields(state, request.message)
+            APPLICATIONS[app_id] = state
+
         # Build invoke input with new message
         invoke_input = dict(state)
         invoke_input["messages"] = list(state.get("messages", [])) + [HumanMessage(content=request.message)]
@@ -347,6 +374,68 @@ def send_message(app_id: str, request: ChatMessageRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _try_recover_missing_fields(state: dict, message: str) -> dict:
+    """
+    When documents are incomplete, try to extract missing critical field
+    values from the user message. Uses simple regex — no LLM needed.
+    
+    Example: user types "my monthly income is 3169"
+    → fills monthly_income = 3169
+    → re-validates and possibly unblocks the pipeline
+    """
+    import re
+    from src.models.global_state import validate_document_extraction, CRITICAL_FIELDS_BY_LOAN_TYPE
+
+    loan_type = state.get("loan_type", "personal")
+    critical = CRITICAL_FIELDS_BY_LOAN_TYPE.get(loan_type, {})
+
+    # Extract the first number from the message
+    num_match = re.search(r'(\d+(?:\.\d+)?)\s*(K|k|M|m)?', message)
+    if not num_match:
+        return state
+
+    raw_num = float(num_match.group(1))
+    mult = num_match.group(2)
+    if mult in ("K", "k"):
+        raw_num *= 1000
+    elif mult in ("M", "m"):
+        raw_num *= 1_000_000
+
+    # Map keywords in the message to field names
+    msg_lower = message.lower()
+    field_keywords = {
+        "monthly_income": ["income", "salary", "salaire", "revenu"],
+        "monthly_cash_flow": ["cash flow", "cashflow", "flux", "trésorerie"],
+        "total_revenue": ["revenue", "chiffre d'affaires", "ca", "ventes"],
+        "net_income": ["net income", "profit", "bénéfice", "net profit"],
+        "total_assets": ["total assets", "actifs"],
+        "total_liabilities": ["liabilities", "passifs", "dettes"],
+        "years_in_operation": ["years in operation", "years old", "since", "depuis"],
+    }
+
+    # Find which critical field matches the message
+    filled_field = None
+    for field in critical:
+        if state.get(field) is not None:
+            continue  # already filled
+        keywords = field_keywords.get(field, [])
+        if any(kw in msg_lower for kw in keywords):
+            state[field] = raw_num
+            filled_field = field
+            break
+
+    if filled_field:
+        print(f"[Recovery] Filled {filled_field} = {raw_num} from chat")
+        # Re-validate
+        report = validate_document_extraction(state)
+        state["document_validation"] = report
+        if not report["has_issues"]:
+            state["application_status"] = "documents_processed"
+            print("[Recovery] All critical fields now present. Unblocking pipeline.")
+
+    return state
+
+
 # ===============================================================
 # Endpoint — Document Upload
 # ===============================================================
@@ -371,6 +460,15 @@ async def upload_documents(app_id: str, files: List[UploadFile] = File(...)):
         uploaded_names.append(file.filename)
 
     state["documents_uploaded"] = True
+
+    # If this is a RE-UPLOAD (previous validation failed), reset the pipeline
+    # state so the documents get reprocessed from scratch
+    if state.get("application_status") == "documents_incomplete":
+        state["document_result"] = {}
+        state["document_validation"] = {}
+        state["application_status"] = "processing_documents"
+        add_progress(app_id, "Re-upload detected. Reprocessing documents from scratch...", "info")
+
     APPLICATIONS[app_id] = state
 
     add_progress(app_id, f"Received {len(uploaded_names)} document(s): {', '.join(uploaded_names)}", "info")
@@ -447,9 +545,19 @@ def _run_full_pipeline_background(app_id: str):
                             assets = extracted.get("total_assets", "N/A")
                             liab = extracted.get("total_liabilities", "N/A")
                             add_progress(app_id, f"Balance sheet ({fname}): Assets {assets}, Liabilities {liab}", "success")
+                        elif doc_type == "unknown":
+                            add_progress(app_id, f"Could not identify {fname}. Please check document type.", "error")
                         else:
                             add_progress(app_id, f"Document ({fname}): Classified as {doc_type}", "info")
-                    add_progress(app_id, "All documents processed.", "success")
+
+                    # Check if validation caught any issues
+                    if state.get("application_status") == "documents_incomplete":
+                        report = state.get("document_validation", {})
+                        add_progress(app_id, f"Validation failed: {report.get('user_message', 'Issues found')}", "error")
+                        add_progress(app_id, "Pipeline paused. Waiting for re-upload or manual value input.", "warning")
+                        break  # exit the pipeline loop — user must act
+                    else:
+                        add_progress(app_id, "All documents processed and validated.", "success")
 
                 elif next_step == "scoring":
                     result = scoring_node(state)

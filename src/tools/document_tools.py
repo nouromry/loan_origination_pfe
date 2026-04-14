@@ -111,6 +111,157 @@ def extract_text(file_path: str) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------
+# Table Extraction (pdfplumber-based, no Ghostscript needed)
+# ---------------------------------------------------------------
+
+@tool
+def extract_tables_as_markdown(file_path: str) -> Dict[str, Any]:
+    """Extracts tables from a PDF and formats them as markdown.
+
+    Uses pdfplumber.extract_tables() which detects tables via whitespace and
+    ruling lines. Returns each table as a markdown-formatted string, plus
+    the non-table body text ("header / narrative").
+
+    Returns:
+        {
+            "success": bool,
+            "has_tables": bool,
+            "tables_markdown": str,    # All tables concatenated as markdown
+            "header_text": str,        # Text that is NOT part of any table
+            "table_count": int,
+            "error": str (only if success=False)
+        }
+    """
+    if not os.path.exists(file_path):
+        return {"success": False, "error": f"File not found: {file_path}"}
+
+    if pdfplumber is None:
+        return {"success": False, "error": "pdfplumber not installed"}
+
+    try:
+        all_tables_md = []
+        all_header_text = []
+        table_count = 0
+
+        with pdfplumber.open(file_path) as pdf:
+            for page_num, page in enumerate(pdf.pages, start=1):
+                # Extract tables from this page
+                tables = page.extract_tables()
+
+                if tables:
+                    for t_idx, table in enumerate(tables, start=1):
+                        if not table or len(table) < 2:
+                            # Need at least a header row + 1 data row
+                            continue
+
+                        md = _table_to_markdown(table)
+                        if md:
+                            all_tables_md.append(
+                                f"### Table {t_idx} (page {page_num})\n\n{md}"
+                            )
+                            table_count += 1
+
+                # Extract "non-table" text from this page
+                # pdfplumber.extract_text() returns ALL text including tables,
+                # so we filter out lines that also appear in table cells
+                page_text = page.extract_text() or ""
+                if page_text.strip():
+                    table_cell_values = set()
+                    for table in tables or []:
+                        for row in table:
+                            for cell in row:
+                                if cell and isinstance(cell, str):
+                                    table_cell_values.add(cell.strip())
+
+                    header_lines = []
+                    for line in page_text.split("\n"):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        # Skip lines that are entirely composed of table cells
+                        if line in table_cell_values:
+                            continue
+                        # Skip lines where >70% of words are table cell values
+                        words = line.split()
+                        cell_words = sum(1 for w in words if w in table_cell_values)
+                        if words and cell_words / len(words) > 0.7:
+                            continue
+                        header_lines.append(line)
+
+                    if header_lines:
+                        all_header_text.append("\n".join(header_lines))
+
+        tables_markdown = "\n\n".join(all_tables_md) if all_tables_md else ""
+        header_text = "\n\n".join(all_header_text) if all_header_text else ""
+
+        return {
+            "success": True,
+            "has_tables": table_count > 0,
+            "tables_markdown": tables_markdown,
+            "header_text": header_text,
+            "table_count": table_count,
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Table extraction failed: {str(e)[:200]}",
+            "has_tables": False,
+            "tables_markdown": "",
+            "header_text": "",
+            "table_count": 0,
+        }
+
+
+def _table_to_markdown(table: list) -> str:
+    """Convert a pdfplumber table (list of rows) to a markdown table string.
+
+    pdfplumber returns rows as lists of strings (or None for empty cells).
+    """
+    if not table or len(table) < 1:
+        return ""
+
+    # Clean cells: replace None with "", strip whitespace, collapse newlines
+    cleaned = []
+    for row in table:
+        cleaned_row = []
+        for cell in row:
+            if cell is None:
+                cleaned_row.append("")
+            else:
+                # Collapse internal newlines and pipes (markdown conflict)
+                value = str(cell).replace("\n", " ").replace("|", "/").strip()
+                cleaned_row.append(value)
+        cleaned.append(cleaned_row)
+
+    # Skip empty rows
+    cleaned = [row for row in cleaned if any(cell for cell in row)]
+    if len(cleaned) < 2:
+        return ""
+
+    # Use first row as header
+    header = cleaned[0]
+    data_rows = cleaned[1:]
+    num_cols = len(header)
+
+    # Normalize all rows to same width
+    header = header + [""] * (num_cols - len(header)) if len(header) < num_cols else header
+    data_rows = [
+        row + [""] * (num_cols - len(row)) if len(row) < num_cols else row[:num_cols]
+        for row in data_rows
+    ]
+
+    # Build markdown
+    lines = []
+    lines.append("| " + " | ".join(header) + " |")
+    lines.append("| " + " | ".join("---" for _ in header) + " |")
+    for row in data_rows:
+        lines.append("| " + " | ".join(row) + " |")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------
 # OCR — Trilingual (Arabic + French + English)
 # ---------------------------------------------------------------
 
