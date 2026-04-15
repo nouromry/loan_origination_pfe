@@ -195,3 +195,63 @@ def test_document_node_reupload_reprocesses(tmp_path, monkeypatch):
     assert out["document_result"]["salary.pdf"]["result"]["net_salary"] == 4500
     assert old_key in out["processed_files"]
     assert new_key in out["processed_files"]
+
+
+def test_orchestrator_routes_to_document_for_unprocessed_incremental_upload(tmp_path, monkeypatch):
+    from src.graph.orchestrator import route
+
+    app_id = "APP_ROUTE_DOC_1"
+    app_dir = tmp_path / app_id
+    app_dir.mkdir()
+    cin_path = app_dir / "cin.pdf"
+    cin_path.write_bytes(b"cin-file-content")
+    file_key = f"cin.pdf:{cin_path.stat().st_size}"
+
+    monkeypatch.setenv("TEMP_UPLOADS_DIR", str(tmp_path))
+
+    state = {
+        "application_id": app_id,
+        "intent": "credit_workflow",
+        "documents_uploaded": True,
+        "processed_files": [],
+        "document_result": {},
+        "loan_type": None,
+        "loan_amount": None,
+        "loan_term_months": None,
+        "national_id": None,
+    }
+    assert route(state) == "document"
+
+    # Once marked processed, route should no longer force document node
+    state["processed_files"] = [file_key]
+    assert route(state) == "collect"
+
+
+def test_orchestrator_documents_incomplete_can_route_to_collect_for_chat_recovery():
+    from src.graph.orchestrator import route
+
+    state = {
+        "application_status": "documents_incomplete",
+        "intent": "credit_workflow",
+        "loan_type": "personal",
+        "loan_amount": None,
+        "loan_term_months": 24,
+        "national_id": "12714074",
+        "messages": [HumanMessage(content="my monthly income is 3169")],
+    }
+    assert route(state) == "collect"
+
+
+def test_orchestrator_documents_incomplete_routes_to_responder_without_extractable_chat():
+    from src.graph.orchestrator import route
+
+    state = {
+        "application_status": "documents_incomplete",
+        "intent": "credit_workflow",
+        "loan_type": "personal",
+        "loan_amount": None,
+        "loan_term_months": 24,
+        "national_id": "12714074",
+        "messages": [HumanMessage(content="okay thanks")],
+    }
+    assert route(state) == "responder"
