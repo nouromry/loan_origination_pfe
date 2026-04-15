@@ -63,7 +63,7 @@ def triage_node(state: GlobalState) -> dict:
     ]
     if any(kw in msg_lower for kw in status_keywords):
         thoughts.append("Triage: intent=ask_status (keyword match)")
-        return {"intent": "ask_status", "thought_steps": thoughts}
+        return {"intent": "ask_status", "in_application_mode": True, "thought_steps": thoughts}
 
     # ================================================================
     # Fast path 1.5: user data inquiry
@@ -79,7 +79,7 @@ def triage_node(state: GlobalState) -> dict:
     ]
     if any(kw in msg_lower for kw in data_keywords):
         thoughts.append("Triage: intent=ask_data (user requested stored information)")
-        return {"intent": "ask_data", "thought_steps": thoughts}
+        return {"intent": "ask_data", "in_application_mode": True, "thought_steps": thoughts}
 
     # ================================================================
     # Fast path 1.6: reset / start over intent
@@ -92,7 +92,7 @@ def triage_node(state: GlobalState) -> dict:
     ]
     if any(kw in msg_lower for kw in reset_keywords):
         thoughts.append("Triage: intent=reset (user requested fresh start)")
-        return {"intent": "reset", "thought_steps": thoughts}
+        return {"intent": "reset", "in_application_mode": True, "thought_steps": thoughts}
 
     # ================================================================
     # Fast path 2: explicit specific policy question
@@ -118,12 +118,17 @@ def triage_node(state: GlobalState) -> dict:
         thoughts.append("Triage: intent=vague_policy (user announced intent but did not ask a specific question)")
         return {
             "intent": "vague_policy",
+            "in_application_mode": bool(state.get("in_application_mode", False)),
             "thought_steps": thoughts,
         }
 
     if is_specific_policy:
         thoughts.append("Triage: intent=policy_question (specific policy keyword + question form)")
-        update = {"intent": "policy_question", "thought_steps": thoughts}
+        update = {
+            "intent": "policy_question",
+            "in_application_mode": bool(state.get("in_application_mode", False)),
+            "thought_steps": thoughts
+        }
         _detect_loan_type(msg_lower, state, update)
         return update
 
@@ -137,7 +142,12 @@ def triage_node(state: GlobalState) -> dict:
         history=[m.content for m in messages[-4:]],
     )
 
-    update = {"intent": result.get("intent", "credit_workflow")}
+    detected_intent = result.get("intent", "credit_workflow")
+    update = {"intent": detected_intent}
+    if detected_intent == "credit_workflow":
+        update["in_application_mode"] = True
+    else:
+        update["in_application_mode"] = bool(state.get("in_application_mode", False))
 
     detected_type = result.get("loan_type")
     if detected_type in ("personal", "business") and not state.get("loan_type"):
@@ -158,5 +168,7 @@ def _detect_loan_type(msg_lower: str, state: dict, update: dict) -> None:
 
     if any(kw in msg_lower for kw in EXPLICIT_PERSONAL):
         update["loan_type"] = "personal"
+        update["in_application_mode"] = True
     elif any(kw in msg_lower for kw in EXPLICIT_BUSINESS):
         update["loan_type"] = "business"
+        update["in_application_mode"] = True

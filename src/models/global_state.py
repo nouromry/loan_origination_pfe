@@ -126,6 +126,35 @@ def get_fields_to_ask(state: dict) -> List[str]:
     return missing
 
 
+def get_collected_data_summary(state: dict) -> str:
+    """
+    Return a compact, user-facing snapshot of currently collected data.
+    Used when the user asks what information is stored for their application.
+    """
+    def _fmt(value, default="not provided"):
+        return default if value is None or value == "" else value
+
+    identity_id = state.get("national_id") or state.get("cin_national_id")
+    identity_dob = state.get("date_of_birth") or state.get("cin_date_of_birth")
+
+    docs = []
+    for _, data in (state.get("document_result", {}) or {}).items():
+        if isinstance(data, dict):
+            doc_type = data.get("type")
+            if doc_type:
+                docs.append(doc_type)
+    docs_text = ", ".join(sorted(set(docs))) if docs else "none"
+
+    return (
+        "Here is what I currently have on file:\n"
+        f"- Identity: name={_fmt(state.get('name'))}, national_id={_fmt(identity_id)}, date_of_birth={_fmt(identity_dob)}\n"
+        f"- Contact: email={_fmt(state.get('email'))}, phone={_fmt(state.get('phone'))}\n"
+        f"- Loan request: type={_fmt(state.get('loan_type'))}, amount={_fmt(state.get('loan_amount'))}, term_months={_fmt(state.get('loan_term_months'))}\n"
+        f"- Financial data: monthly_income={_fmt(state.get('monthly_income'))}, monthly_cash_flow={_fmt(state.get('monthly_cash_flow'))}, credit_score={_fmt(state.get('credit_score'))}\n"
+        f"- Documents processed: {docs_text}"
+    )
+
+
 # ---------------------------------------------------------------
 # Document Validation — checks quality of extracted data
 # ---------------------------------------------------------------
@@ -314,6 +343,7 @@ class GlobalState(TypedDict, total=False):
     # State Booleans
     credit_score_fetched: bool
     documents_uploaded: bool
+    in_application_mode: bool
 
     # Node Result Containers
     document_result: Dict[str, Any]
