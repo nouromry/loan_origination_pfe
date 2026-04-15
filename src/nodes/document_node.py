@@ -60,23 +60,45 @@ def document_node(state: GlobalState) -> GlobalState:
         add_thought(state, f"Upload directory not found: {app_dir}")
         return state
 
-    files_to_process = [
+    all_files = [
         os.path.join(app_dir, f)
         for f in os.listdir(app_dir)
         if f.lower().endswith(('.pdf', '.png', '.jpg', '.jpeg', '.tiff'))
     ]
 
-    if not files_to_process:
+    if not all_files:
         add_thought(state, "No documents found in upload directory.")
         return state
 
-    add_thought(state, f"Found {len(files_to_process)} document(s) to process.")
+    # Filter out files we've already processed (by name + size)
+    # This enables incremental upload: user adds a new doc later,
+    # we only process the new one. If the same filename has a different
+    # size, treat it as a re-upload and process it again.
+    processed = set(state.get("processed_files") or [])
+    files_to_process = []
+    for file_path in all_files:
+        file_name = os.path.basename(file_path)
+        try:
+            file_size = os.path.getsize(file_path)
+        except OSError:
+            file_size = 0
+        file_key = f"{file_name}:{file_size}"
+        if file_key not in processed:
+            files_to_process.append((file_path, file_key))
+
+    if not files_to_process:
+        add_thought(state, f"All {len(all_files)} document(s) already processed. Nothing new to do.")
+        return state
+
+    add_thought(state,
+        f"Found {len(all_files)} document(s) total, {len(files_to_process)} new to process."
+    )
 
     # 2. Process each file: extract → classify → parse
-    all_results = {}
-    cin_result = None
+    # Keep prior results — only ADD new ones
+    all_results = dict(state.get("document_result") or {})
 
-    for file_path in files_to_process:
+    for file_path, file_key in files_to_process:
         file_name = os.path.basename(file_path)
         add_thought(state, f"Processing: {file_name}")
 
@@ -95,6 +117,11 @@ def document_node(state: GlobalState) -> GlobalState:
             else:
                 add_thought(state, f"OCR also failed for {file_name}: {ocr_result.get('error')}")
                 all_results[file_name] = {"error": "Text extraction failed", "file": file_path}
+                # Mark as processed even though it failed — don't infinite-retry corrupted files
+                if "processed_files" not in state or state["processed_files"] is None:
+                    state["processed_files"] = []
+                if file_key not in state["processed_files"]:
+                    state["processed_files"].append(file_key)
                 continue
 
         # Step B: Classify document type
@@ -125,6 +152,13 @@ def document_node(state: GlobalState) -> GlobalState:
             )
             all_results[file_name] = {"type": doc_type, "result": doc_result}
 
+        # Mark this file as processed (regardless of success/failure)
+        # so we don't re-process it on the next pipeline run
+        if "processed_files" not in state or state["processed_files"] is None:
+            state["processed_files"] = []
+        if file_key not in state["processed_files"]:
+            state["processed_files"].append(file_key)
+
     # 3. Store combined result
     state["document_result"] = all_results
 
@@ -133,7 +167,6 @@ def document_node(state: GlobalState) -> GlobalState:
 
     # 5. Validate that we got everything we need from the documents
     from src.models.global_state import validate_document_extraction
-    report = state.get("document_validation") or {}
     report = validate_document_extraction(state)
     state["document_validation"] = report
 
@@ -154,16 +187,37 @@ def _process_cin_card(state: GlobalState, text: str, file_name: str) -> dict:
     result = parse_cin_card.invoke({"extracted_text": text})
 
     # Pre-fill GlobalState from CIN extraction
-    cin_fields = {
-        "cin_national_id": result.get("cin_national_id"),
-        "cin_date_of_birth": result.get("cin_date_of_birth"),
-        "name": result.get("name"),
-        "home_address": result.get("home_address"),
+    # Both the CIN-specific fields (for cross-checking) AND the
+    # chat-collectible fields (so we don't ask the user again)
+    cin_id = result.get("cin_national_id")
+    cin_dob = result.get("cin_date_of_birth")
+    cin_name = result.get("name")
+    cin_addr = result.get("home_address")
+
+    pre_fill = {
+        # CIN-specific (for cross-check vs typed national_id)
+        "cin_national_id": cin_id,
+        "cin_date_of_birth": cin_dob,
+        # Chat-collectible (so collect_node doesn't re-ask)
+        "national_id": cin_id,
+        "date_of_birth": cin_dob,
+        "name": cin_name,
+        "home_address": cin_addr,
     }
 
-    for field, value in cin_fields.items():
+    filled_chat_fields = []
+    for field, value in pre_fill.items():
         if value is not None and state.get(field) is None:
             state[field] = value
+            if field in ("national_id", "date_of_birth", "name"):
+                filled_chat_fields.append(field)
+
+    if filled_chat_fields:
+        add_thought(
+            state,
+            f"CIN auto-filled chat fields: {', '.join(filled_chat_fields)} "
+            f"(no need to ask user again)"
+        )
 
     quality = result.get("extraction_quality", "unknown")
     fields_found = result.get("fields_extracted", 0)

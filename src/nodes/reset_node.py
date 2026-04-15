@@ -28,6 +28,8 @@ def reset_node(state: GlobalState) -> dict:
         "credit_score_fetched": False,
         "documents_uploaded": False,
         "document_result": {},
+        "document_validation": {},
+        "processed_files": [],
         "scoring_result": {},
         "risk_result": {},
         "decision_result": {},
