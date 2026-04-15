@@ -104,9 +104,24 @@ def get_fields_to_ask(state: dict) -> List[str]:
     else:
         required = base_fields
 
+    # Some fields can be satisfied from verified document extraction
+    # (upload-first flow), so we should not re-ask them.
+    doc_fallbacks = {
+        "national_id": "cin_national_id",
+        "date_of_birth": "cin_date_of_birth",
+    }
+
+    def _is_missing(field_name: str) -> bool:
+        if state.get(field_name) is not None:
+            return False
+        fallback_field = doc_fallbacks.get(field_name)
+        if fallback_field and state.get(fallback_field) is not None:
+            return False
+        return True
+
     missing = []
     for field in required:
-        if state.get(field) is None:
+        if _is_missing(field):
             missing.append(field)
     return missing
 

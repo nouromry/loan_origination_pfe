@@ -16,6 +16,7 @@ from src.nodes.risk_assessment_node import risk_assessment_node
 from src.nodes.decision_node import decision_node
 from src.nodes.policy_node import policy_node
 from src.nodes.responder_node import responder_node
+from src.nodes.reset_node import reset_node
 
 
 class NodeFactory:
@@ -55,6 +56,10 @@ class NodeFactory:
     @staticmethod
     def responder(state):
         return responder_node(state)
+
+    @staticmethod
+    def reset(state):
+        return reset_node(state)
 
 
 # Module-level singleton

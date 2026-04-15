@@ -32,6 +32,14 @@ def route(state: GlobalState) -> str:
     if state.get("intent") == "ask_status":
         return "responder"
 
+    # 0.55. User asks what data we have on file
+    if state.get("intent") == "ask_data":
+        return "responder"
+
+    # 0.57. User asked to start over
+    if state.get("intent") == "reset":
+        return "reset"
+
     # 0.6. Vague policy announcement ("I want to ask about policies" without a specific question)
     #      → skip RAG, let responder ask for clarification
     if state.get("intent") == "vague_policy":
@@ -91,6 +99,7 @@ def build_graph() -> StateGraph:
     graph.add_node("decision", node_factory.decision)
     graph.add_node("policy", node_factory.policy)
     graph.add_node("responder", node_factory.responder)
+    graph.add_node("reset", node_factory.reset)
 
     # Every message enters at triage
     graph.set_entry_point("triage")
@@ -103,11 +112,12 @@ def build_graph() -> StateGraph:
         "risk_assessment": "risk_assessment",
         "decision": "decision",
         "policy": "policy",
+        "reset": "reset",
         "responder": "responder",
     })
 
     # Every processing node → responder → END
-    for node_name in ["collect", "document", "scoring", "risk_assessment", "decision", "policy"]:
+    for node_name in ["collect", "document", "scoring", "risk_assessment", "decision", "policy", "reset"]:
         graph.add_edge(node_name, "responder")
 
     graph.add_edge("responder", END)

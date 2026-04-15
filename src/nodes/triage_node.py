@@ -57,10 +57,42 @@ def triage_node(state: GlobalState) -> dict:
         "status", "where are we", "how far", "progress", "what stage",
         "where is my application", "application status", "how is my",
         "what's happening", "update on my", "check my application",
+        "où en suis", "ou en suis", "avancement", "état de ma demande",
+        "etat de ma demande", "suivi de ma demande",
+        "وين وصلت", "حالة طلبي", "شنو حالة طلبي", "فين وصلت",
     ]
     if any(kw in msg_lower for kw in status_keywords):
         thoughts.append("Triage: intent=ask_status (keyword match)")
         return {"intent": "ask_status", "thought_steps": thoughts}
+
+    # ================================================================
+    # Fast path 1.5: user data inquiry
+    # ================================================================
+    data_keywords = [
+        "what info do you have on me", "what information do you have on me",
+        "what data do you have on me", "what do you know about me",
+        "show my data", "show my information", "show what you have",
+        "quelles informations avez-vous sur moi", "quelles infos avez-vous sur moi",
+        "quelles données avez-vous sur moi", "montre mes informations",
+        "ما المعلومات التي لديك عني", "ما هي المعلومات عندك عني",
+        "شنو تعرف علي", "شنو المعلومات اللي عندك علي",
+    ]
+    if any(kw in msg_lower for kw in data_keywords):
+        thoughts.append("Triage: intent=ask_data (user requested stored information)")
+        return {"intent": "ask_data", "thought_steps": thoughts}
+
+    # ================================================================
+    # Fast path 1.6: reset / start over intent
+    # ================================================================
+    reset_keywords = [
+        "start over", "from scratch", "reset", "cancel application",
+        "let me cancel", "let me start over", "try again",
+        "recommencer", "recommence", "à zéro", "a zero",
+        "ابدأ من جديد", "من الصفر", "إعادة البدء", "اعادة البدء",
+    ]
+    if any(kw in msg_lower for kw in reset_keywords):
+        thoughts.append("Triage: intent=reset (user requested fresh start)")
+        return {"intent": "reset", "thought_steps": thoughts}
 
     # ================================================================
     # Fast path 2: explicit specific policy question
