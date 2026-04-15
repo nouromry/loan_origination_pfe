@@ -23,7 +23,13 @@ FIELD_QUESTIONS = {
 def responder_node(state: GlobalState) -> dict:
     """The ONLY node that generates user-facing text."""
     try:
-        response = _generate_llm_response(state)
+        intent = state.get("intent")
+        if intent == "reset":
+            response = "Done — I've cleared your application data and started fresh. How can I help you?"
+        elif intent == "ask_data":
+            response = _build_user_data_snapshot(state)
+        else:
+            response = _generate_llm_response(state)
         status_msg = get_status_summary(state)
 
         return {
@@ -38,6 +44,32 @@ def responder_node(state: GlobalState) -> dict:
             "last_response": fallback,
             "messages": [AIMessage(content=fallback)]
         }
+
+
+def _build_user_data_snapshot(state: GlobalState) -> str:
+    """Build a compact structured summary of collected user/application data."""
+    def fmt(value, default="not provided"):
+        return default if value is None or value == "" else value
+
+    identity_id = state.get("national_id") or state.get("cin_national_id")
+    identity_dob = state.get("date_of_birth") or state.get("cin_date_of_birth")
+
+    docs = []
+    for _, data in (state.get("document_result", {}) or {}).items():
+        if isinstance(data, dict):
+            doc_type = data.get("type")
+            if doc_type:
+                docs.append(doc_type)
+    docs_text = ", ".join(sorted(set(docs))) if docs else "none"
+
+    return (
+        "Here is what I currently have on file:\n"
+        f"- Identity: name={fmt(state.get('name'))}, national_id={fmt(identity_id)}, date_of_birth={fmt(identity_dob)}\n"
+        f"- Contact: email={fmt(state.get('email'))}, phone={fmt(state.get('phone'))}\n"
+        f"- Loan request: type={fmt(state.get('loan_type'))}, amount={fmt(state.get('loan_amount'))}, term_months={fmt(state.get('loan_term_months'))}\n"
+        f"- Financial data: monthly_income={fmt(state.get('monthly_income'))}, monthly_cash_flow={fmt(state.get('monthly_cash_flow'))}, credit_score={fmt(state.get('credit_score'))}\n"
+        f"- Documents processed: {docs_text}"
+    )
 
 
 def _generate_llm_response(state: GlobalState) -> str:
