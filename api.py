@@ -505,7 +505,9 @@ async def upload_documents(app_id: str, files: List[UploadFile] = File(...)):
         # guaranteed to be reprocessed.
         kept_processed = []
         for file_key in (state.get("processed_files") or []):
-            base_name = file_key.split(PROCESSED_FILE_KEY_SEPARATOR, 1)[0]
+            base_name, separator, _ = file_key.partition(PROCESSED_FILE_KEY_SEPARATOR)
+            if not separator:
+                base_name = file_key
             if base_name not in uploaded_names:
                 kept_processed.append(file_key)
         state["processed_files"] = kept_processed

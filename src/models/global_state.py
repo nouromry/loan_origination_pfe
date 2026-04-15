@@ -138,10 +138,10 @@ def get_collected_data_summary(state: dict) -> str:
     identity_dob = state.get("date_of_birth") or state.get("cin_date_of_birth")
 
     docs = []
-    for filename, data in (state.get("document_result", {}) or {}).items():
+    for _, data in (state.get("document_result", {}) or {}).items():
         if isinstance(data, dict):
             doc_type = data.get("type")
-            if filename and doc_type:
+            if doc_type:
                 docs.append(doc_type)
     docs_text = ", ".join(sorted(set(docs))) if docs else "none"
 
