@@ -12,6 +12,7 @@ Flow:
 """
 
 import os
+import re
 from langgraph.graph import StateGraph, END
 from src.models.global_state import GlobalState
 from src.graph.node_factory import node_factory
@@ -102,9 +103,8 @@ def route(state: GlobalState) -> str:
             messages = state.get("messages", [])
             if messages:
                 latest = messages[-1].content if hasattr(messages[-1], "content") else str(messages[-1])
-                import re as _re
                 # If message contains digits or @, it may have extractable data
-                if _re.search(r"\d|@", latest):
+                if re.search(r"\d|@", latest):
                     return "collect"
 
         # Nothing useful in the message — show the "documents needed" message

@@ -1,4 +1,5 @@
 from langchain_core.messages import HumanMessage
+import os
 
 
 def test_get_fields_to_ask_uses_cin_fallbacks():
@@ -84,7 +85,7 @@ def test_document_node_keeps_prior_results(tmp_path, monkeypatch):
             return self._fn(payload)
 
     def fake_extract_text(payload):
-        file_name = payload["file_path"].split("/")[-1]
+        file_name = os.path.basename(payload["file_path"])
         return {"success": True, "text": f"content for {file_name} " + ("x" * 80)}
 
     monkeypatch.setattr(dn, "extract_text", _Tool(fake_extract_text))
