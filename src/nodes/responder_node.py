@@ -55,7 +55,7 @@ def _build_user_data_snapshot(state: GlobalState) -> str:
     identity_dob = state.get("date_of_birth") or state.get("cin_date_of_birth")
 
     docs = []
-    for _, data in (state.get("document_result", {}) or {}).items():
+    for filename, data in (state.get("document_result", {}) or {}).items():
         if isinstance(data, dict):
             doc_type = data.get("type")
             if doc_type:
