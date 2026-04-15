@@ -60,7 +60,7 @@ def test_reset_node_clears_application_data():
     assert out["processed_files"] == []
 
 
-def test_document_node_incremental_processing_keeps_prior_results(tmp_path, monkeypatch):
+def test_document_node_keeps_prior_results(tmp_path, monkeypatch):
     from src.nodes import document_node as dn
 
     app_id = "APP_INC_1"
@@ -135,7 +135,7 @@ def test_document_node_incremental_processing_keeps_prior_results(tmp_path, monk
     assert salary_key in out["processed_files"]
 
 
-def test_document_node_reupload_same_name_different_size_reprocesses(tmp_path, monkeypatch):
+def test_document_node_reupload_reprocesses(tmp_path, monkeypatch):
     from src.nodes import document_node as dn
 
     app_id = "APP_REUP_1"

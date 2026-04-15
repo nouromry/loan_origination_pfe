@@ -50,6 +50,8 @@ def document_node(state: GlobalState) -> GlobalState:
     state["application_status"] = "processing_documents"
     state["stage"] = "processing"
     add_thought(state, "Processing uploaded documents...")
+    if state.get("processed_files") is None:
+        state["processed_files"] = []
 
     # 1. Find files
     upload_dir = os.getenv("TEMP_UPLOADS_DIR", "./temp_uploads")
@@ -90,9 +92,7 @@ def document_node(state: GlobalState) -> GlobalState:
         add_thought(state, f"All {len(all_files)} document(s) already processed. Nothing new to do.")
         return state
 
-    add_thought(state,
-        f"Found {len(all_files)} document(s) total, {len(files_to_process)} new to process."
-    )
+    add_thought(state, f"Found {len(all_files)} document(s) total, {len(files_to_process)} new to process.")
 
     # 2. Process each file: extract → classify → parse
     # Keep prior results — only ADD new ones
@@ -118,8 +118,6 @@ def document_node(state: GlobalState) -> GlobalState:
                 add_thought(state, f"OCR also failed for {file_name}: {ocr_result.get('error')}")
                 all_results[file_name] = {"error": "Text extraction failed", "file": file_path}
                 # Mark as processed even though it failed — don't infinite-retry corrupted files
-                if "processed_files" not in state or state["processed_files"] is None:
-                    state["processed_files"] = []
                 if file_key not in state["processed_files"]:
                     state["processed_files"].append(file_key)
                 continue
@@ -154,8 +152,6 @@ def document_node(state: GlobalState) -> GlobalState:
 
         # Mark this file as processed (regardless of success/failure)
         # so we don't re-process it on the next pipeline run
-        if "processed_files" not in state or state["processed_files"] is None:
-            state["processed_files"] = []
         if file_key not in state["processed_files"]:
             state["processed_files"].append(file_key)
 
