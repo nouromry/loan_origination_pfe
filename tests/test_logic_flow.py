@@ -1,4 +1,5 @@
 from langchain_core.messages import HumanMessage
+import os
 
 
 def test_get_fields_to_ask_uses_cin_fallbacks():
@@ -46,6 +47,8 @@ def test_reset_node_clears_application_data():
         "national_id": "12714074",
         "documents_uploaded": True,
         "document_result": {"cin.pdf": {"type": "cin_card"}},
+        "document_validation": {"has_issues": True},
+        "processed_files": ["cin.pdf:1000"],
         "messages": [HumanMessage(content="start over")],
     }
     out = reset_node(state)
@@ -54,3 +57,202 @@ def test_reset_node_clears_application_data():
     assert out["national_id"] is None
     assert out["documents_uploaded"] is False
     assert out["document_result"] == {}
+    assert out["document_validation"] == {}
+    assert out["processed_files"] == []
+
+
+def test_document_node_keeps_prior_results(tmp_path, monkeypatch):
+    from src.nodes import document_node as dn
+
+    app_id = "APP_INC_1"
+    app_dir = tmp_path / app_id
+    app_dir.mkdir()
+    cin_path = app_dir / "cin.pdf"
+    salary_path = app_dir / "salary.pdf"
+    cin_path.write_bytes(b"old-cin-content")
+    salary_path.write_bytes(b"new-salary-content")
+
+    cin_key = f"cin.pdf:{cin_path.stat().st_size}"
+    salary_key = f"salary.pdf:{salary_path.stat().st_size}"
+
+    monkeypatch.setenv("TEMP_UPLOADS_DIR", str(tmp_path))
+
+    class _Tool:
+        def __init__(self, fn):
+            self._fn = fn
+
+        def invoke(self, payload):
+            return self._fn(payload)
+
+    def fake_extract_text(payload):
+        file_name = os.path.basename(payload["file_path"])
+        return {"success": True, "text": f"content for {file_name} " + ("x" * 80)}
+
+    monkeypatch.setattr(dn, "extract_text", _Tool(fake_extract_text))
+    monkeypatch.setattr(dn, "ocr_extract_text", _Tool(lambda payload: {"success": False, "error": "unused"}))
+    monkeypatch.setattr(
+        dn,
+        "classify_document_type",
+        _Tool(lambda payload: "salary_slip" if payload["file_name"] == "salary.pdf" else "cin_card"),
+    )
+    monkeypatch.setattr(dn, "parse_cin_card", _Tool(lambda payload: {"cin_national_id": "12714074"}))
+    monkeypatch.setattr(dn, "extract_tables_as_markdown", _Tool(lambda payload: {"success": False, "has_tables": False}))
+    monkeypatch.setattr(dn, "cross_check_cin", _Tool(lambda payload: {"fraud_flag": False, "dob_match": True}))
+
+    class _FakeDocumentAgent:
+        def run(self, **kwargs):
+            return {"net_salary": 3169}
+
+    monkeypatch.setattr(dn, "DocumentAgent", _FakeDocumentAgent)
+
+    import src.models.global_state as gs
+    monkeypatch.setattr(
+        gs,
+        "validate_document_extraction",
+        lambda state: {
+            "has_issues": False,
+            "failed_documents": [],
+            "unknown_documents": [],
+            "missing_critical_fields": [],
+            "expected_not_uploaded": [],
+            "user_message": "ok",
+        },
+    )
+
+    state = {
+        "application_id": app_id,
+        "loan_type": "personal",
+        "thought_steps": [],
+        "processed_files": [cin_key],
+        "document_result": {"cin.pdf": {"type": "cin_card", "result": {"cin_national_id": "12714074"}}},
+    }
+
+    out = dn.document_node(state)
+
+    assert "cin.pdf" in out["document_result"]
+    assert "salary.pdf" in out["document_result"]
+    assert out["document_result"]["salary.pdf"]["type"] == "salary_slip"
+    assert cin_key in out["processed_files"]
+    assert salary_key in out["processed_files"]
+
+
+def test_document_node_reupload_reprocesses(tmp_path, monkeypatch):
+    from src.nodes import document_node as dn
+
+    app_id = "APP_REUP_1"
+    app_dir = tmp_path / app_id
+    app_dir.mkdir()
+    salary_path = app_dir / "salary.pdf"
+    salary_path.write_bytes(b"new-content-with-different-size")
+
+    new_key = f"salary.pdf:{salary_path.stat().st_size}"
+    old_key = "salary.pdf:3"
+
+    monkeypatch.setenv("TEMP_UPLOADS_DIR", str(tmp_path))
+
+    class _Tool:
+        def __init__(self, fn):
+            self._fn = fn
+
+        def invoke(self, payload):
+            return self._fn(payload)
+
+    monkeypatch.setattr(dn, "extract_text", _Tool(lambda payload: {"success": True, "text": "x" * 120}))
+    monkeypatch.setattr(dn, "ocr_extract_text", _Tool(lambda payload: {"success": False, "error": "unused"}))
+    monkeypatch.setattr(dn, "classify_document_type", _Tool(lambda payload: "salary_slip"))
+    monkeypatch.setattr(dn, "extract_tables_as_markdown", _Tool(lambda payload: {"success": False, "has_tables": False}))
+    monkeypatch.setattr(dn, "cross_check_cin", _Tool(lambda payload: {"fraud_flag": False, "dob_match": True}))
+
+    class _FakeDocumentAgent:
+        def run(self, **kwargs):
+            return {"net_salary": 4500}
+
+    monkeypatch.setattr(dn, "DocumentAgent", _FakeDocumentAgent)
+
+    import src.models.global_state as gs
+    monkeypatch.setattr(
+        gs,
+        "validate_document_extraction",
+        lambda state: {
+            "has_issues": False,
+            "failed_documents": [],
+            "unknown_documents": [],
+            "missing_critical_fields": [],
+            "expected_not_uploaded": [],
+            "user_message": "ok",
+        },
+    )
+
+    state = {
+        "application_id": app_id,
+        "loan_type": "personal",
+        "thought_steps": [],
+        "processed_files": [old_key],
+        "document_result": {"salary.pdf": {"type": "salary_slip", "result": {"net_salary": 1200}}},
+    }
+
+    out = dn.document_node(state)
+
+    assert out["document_result"]["salary.pdf"]["result"]["net_salary"] == 4500
+    assert old_key in out["processed_files"]
+    assert new_key in out["processed_files"]
+
+
+def test_orchestrator_routes_to_document_for_unprocessed_incremental_upload(tmp_path, monkeypatch):
+    from src.graph.orchestrator import route
+
+    app_id = "APP_ROUTE_DOC_1"
+    app_dir = tmp_path / app_id
+    app_dir.mkdir()
+    cin_path = app_dir / "cin.pdf"
+    cin_path.write_bytes(b"cin-file-content")
+    file_key = f"cin.pdf:{cin_path.stat().st_size}"
+
+    monkeypatch.setenv("TEMP_UPLOADS_DIR", str(tmp_path))
+
+    state = {
+        "application_id": app_id,
+        "intent": "credit_workflow",
+        "documents_uploaded": True,
+        "processed_files": [],
+        "document_result": {},
+        "loan_type": None,
+        "loan_amount": None,
+        "loan_term_months": None,
+        "national_id": None,
+    }
+    assert route(state) == "document"
+
+    # Once marked processed, route should no longer force document node
+    state["processed_files"] = [file_key]
+    assert route(state) == "collect"
+
+
+def test_orchestrator_documents_incomplete_can_route_to_collect_for_chat_recovery():
+    from src.graph.orchestrator import route
+
+    state = {
+        "application_status": "documents_incomplete",
+        "intent": "credit_workflow",
+        "loan_type": "personal",
+        "loan_amount": None,
+        "loan_term_months": 24,
+        "national_id": "12714074",
+        "messages": [HumanMessage(content="my monthly income is 3169")],
+    }
+    assert route(state) == "collect"
+
+
+def test_orchestrator_documents_incomplete_routes_to_responder_without_extractable_chat():
+    from src.graph.orchestrator import route
+
+    state = {
+        "application_status": "documents_incomplete",
+        "intent": "credit_workflow",
+        "loan_type": "personal",
+        "loan_amount": None,
+        "loan_term_months": 24,
+        "national_id": "12714074",
+        "messages": [HumanMessage(content="okay thanks")],
+    }
+    assert route(state) == "responder"

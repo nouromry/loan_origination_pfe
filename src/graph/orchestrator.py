@@ -11,9 +11,57 @@ Flow:
     User message → triage → route() picks next node → node runs → responder → END
 """
 
+import os
+import re
 from langgraph.graph import StateGraph, END
 from src.models.global_state import GlobalState
 from src.graph.node_factory import node_factory
+
+
+def _missing_mandatory_chat_fields(state: dict) -> bool:
+    """
+    Check if mandatory chat-collected fields are still missing.
+    Documents alone are not enough to make a decision — we need basic
+    loan parameters from the chat (amount, term, etc.).
+    """
+    mandatory = ["loan_type", "loan_amount", "loan_term_months", "national_id"]
+    for field in mandatory:
+        if state.get(field) is None:
+            return True
+    return False
+
+
+def _has_unprocessed_files(state: dict) -> bool:
+    """
+    Check if there are uploaded files that haven't been processed yet.
+    A file is "processed" if its name+size key is in state['processed_files'].
+    Enables incremental document upload.
+    """
+    upload_dir = os.getenv("TEMP_UPLOADS_DIR", "./temp_uploads")
+    app_id = state.get("application_id", "UNKNOWN")
+    app_dir = os.path.join(upload_dir, app_id)
+
+    if not os.path.exists(app_dir):
+        return False
+
+    processed = set(state.get("processed_files") or [])
+    valid_extensions = ('.pdf', '.png', '.jpg', '.jpeg', '.tiff')
+
+    try:
+        for fname in os.listdir(app_dir):
+            if not fname.lower().endswith(valid_extensions):
+                continue
+            try:
+                fsize = os.path.getsize(os.path.join(app_dir, fname))
+            except OSError:
+                continue
+            file_key = f"{fname}:{fsize}"
+            if file_key not in processed:
+                return True
+    except OSError:
+        return False
+
+    return False
 
 
 def route(state: GlobalState) -> str:
@@ -45,21 +93,40 @@ def route(state: GlobalState) -> str:
     if state.get("intent") == "vague_policy":
         return "responder"
 
-    # 0.7. Document validation failed — ask user to re-upload or provide values
-    #      This catches missing critical fields, failed extractions, unknown docs
+    # 0.7. Document validation failed — but FIRST try to extract any chat data
+    #      from the user's message (loan_amount, email, phone, etc.).
+    #      Only block on documents_incomplete if there's nothing to extract.
     if state.get("application_status") == "documents_incomplete":
+        # If the user provided any extractable data in chat, route to collect
+        # so we can capture it. On the NEXT turn, validation rechecks.
+        if _missing_mandatory_chat_fields(state):
+            messages = state.get("messages", [])
+            if messages:
+                latest = messages[-1].content if hasattr(messages[-1], "content") else str(messages[-1])
+                # If message contains digits or @, it may have extractable data
+                if re.search(r"\d|@", latest):
+                    return "collect"
+
+        # Nothing useful in the message — show the "documents needed" message
         return "responder"
 
     # 1. Policy question → skip everything → answer and return
     if state.get("intent") == "policy_question":
         return "policy"
 
-    # 2. Documents uploaded but not yet processed → process them now
-    if state.get("documents_uploaded") and not state.get("document_result"):
+    # 2. Documents uploaded but some are not yet processed → process them now
+    #    Checks both: never-processed (document_result empty) AND incremental
+    #    (new files added after prior processing)
+    if state.get("documents_uploaded") and _has_unprocessed_files(state):
         return "document"
 
-    # 3. Documents processed, DTI not yet calculated → score now
-    #    (both personal and business need DTI)
+    # 2.5. Documents processed but mandatory chat fields still missing
+    #      → go back to data collection, don't try to score with incomplete data
+    if state.get("document_result"):
+        if _missing_mandatory_chat_fields(state):
+            return "collect"
+
+    # 3. Documents processed, all chat fields present, DTI not yet calculated → score
     if state.get("document_result") and not state.get("scoring_result"):
         return "scoring"
 

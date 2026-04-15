@@ -317,9 +317,11 @@ class GlobalState(TypedDict, total=False):
 
     # Node Result Containers
     document_result: Dict[str, Any]
+    document_validation: Dict[str, Any]
     scoring_result: Dict[str, Any]
     risk_result: Dict[str, Any]
     decision_result: Dict[str, Any]
+    processed_files: List[str]
 
     # Conversation & UI
     thought_steps: List[str]              # Chain of thought exposed to the UI
