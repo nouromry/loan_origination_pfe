@@ -117,7 +117,7 @@ def document_node(state: GlobalState) -> GlobalState:
             else:
                 add_thought(state, f"OCR also failed for {file_name}: {ocr_result.get('error')}")
                 all_results[file_name] = {"error": "Text extraction failed", "file": file_path}
-                # Mark as processed even though it failed — don't infinite-retry corrupted files
+                # Mark as processed even though it failed — don't infinitely retry corrupted files
                 if file_key not in state["processed_files"]:
                     state["processed_files"].append(file_key)
                 continue
