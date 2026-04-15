@@ -118,7 +118,7 @@ def triage_node(state: GlobalState) -> dict:
         thoughts.append("Triage: intent=vague_policy (user announced intent but did not ask a specific question)")
         return {
             "intent": "vague_policy",
-            "in_application_mode": bool(state.get("in_application_mode", False)),
+            "in_application_mode": state.get("in_application_mode", False),
             "thought_steps": thoughts,
         }
 
@@ -126,8 +126,8 @@ def triage_node(state: GlobalState) -> dict:
         thoughts.append("Triage: intent=policy_question (specific policy keyword + question form)")
         update = {
             "intent": "policy_question",
-            "in_application_mode": bool(state.get("in_application_mode", False)),
-            "thought_steps": thoughts
+            "in_application_mode": state.get("in_application_mode", False),
+            "thought_steps": thoughts,
         }
         _detect_loan_type(msg_lower, state, update)
         return update
@@ -147,7 +147,7 @@ def triage_node(state: GlobalState) -> dict:
     if detected_intent == "credit_workflow":
         update["in_application_mode"] = True
     else:
-        update["in_application_mode"] = bool(state.get("in_application_mode", False))
+        update["in_application_mode"] = state.get("in_application_mode", False)
 
     detected_type = result.get("loan_type")
     if detected_type in ("personal", "business") and not state.get("loan_type"):

@@ -24,6 +24,10 @@ FIELD_QUESTIONS = {
     "number_of_employees": "How many employees does your business have?",
     "applicant_ownership_percentage": "What percentage of the business do you own?",
 }
+NO_ACTIVE_APPLICATION_MSG = (
+    "I don't have an active application in progress yet. "
+    "Share your loan details and I'll start collecting your data."
+)
 
 def responder_node(state: GlobalState) -> dict:
     """The ONLY node that generates user-facing text."""
@@ -33,10 +37,7 @@ def responder_node(state: GlobalState) -> dict:
             response = "Done — I've cleared your application data and started fresh. How can I help you?"
         elif intent == "ask_data":
             if not state.get("in_application_mode", False):
-                response = (
-                    "I don't have an active application in progress yet. "
-                    "Share your loan details and I'll start collecting your data."
-                )
+                response = NO_ACTIVE_APPLICATION_MSG
             else:
                 response = get_collected_data_summary(state)
         else:

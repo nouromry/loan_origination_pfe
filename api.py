@@ -45,6 +45,7 @@ from src.nodes.decision_node import decision_node
 from src.nodes.triage_node import triage_node
 from src.nodes.policy_node import policy_node
 from src.nodes.responder_node import responder_node
+from src.nodes.triage_node import EXPLICIT_PERSONAL, EXPLICIT_BUSINESS
 
 
 # ===============================================================
@@ -71,6 +72,7 @@ app.add_middleware(
 # Maps application_id → GlobalState dict
 # Lost on server restart. For production, swap with Redis.
 APPLICATIONS: Dict[str, dict] = {}
+PROCESSED_FILE_KEY_SEPARATOR = ":"
 
 # Maps application_id → list of progress messages from pipeline steps
 PROGRESS_LOGS: Dict[str, List[Dict[str, Any]]] = {}
@@ -400,24 +402,27 @@ def _try_recover_missing_fields(state: dict, message: str) -> dict:
     critical = CRITICAL_FIELDS_BY_LOAN_TYPE.get(loan_type, {})
 
     chat_extractors = {
-        "national_id": extract_national_id.invoke({"message": message}),
-        "email": extract_email.invoke({"message": message}),
-        "phone": extract_phone.invoke({"message": message}),
-        "loan_amount": extract_amount.invoke({"message": message}),
-        "loan_term_months": extract_loan_term.invoke({"message": message}),
+        "national_id": extract_national_id.invoke({"message": message}) if state.get("national_id") is None else None,
+        "email": extract_email.invoke({"message": message}) if state.get("email") is None else None,
+        "phone": extract_phone.invoke({"message": message}) if state.get("phone") is None else None,
+        "loan_amount": extract_amount.invoke({"message": message}) if state.get("loan_amount") is None else None,
+        "loan_term_months": extract_loan_term.invoke({"message": message}) if state.get("loan_term_months") is None else None,
     }
     msg_lower = message.lower()
     if state.get("loan_type") is None:
-        if any(kw in msg_lower for kw in ("personal loan", "personal credit", "prêt personnel", "crédit personnel")):
+        if any(kw in msg_lower for kw in EXPLICIT_PERSONAL):
             chat_extractors["loan_type"] = "personal"
-        elif any(kw in msg_lower for kw in ("business loan", "business credit", "prêt professionnel", "for my business", "pour mon entreprise")):
+        elif any(kw in msg_lower for kw in EXPLICIT_BUSINESS):
             chat_extractors["loan_type"] = "business"
 
+    updated_any_chat_field = False
     for field, value in chat_extractors.items():
         if value is not None and state.get(field) is None:
             state[field] = value
-            state["in_application_mode"] = True
+            updated_any_chat_field = True
             print(f"[Recovery] Filled chat field {field} = {value}")
+    if updated_any_chat_field:
+        state["in_application_mode"] = True
 
     # Extract the first number from the message for document-critical financials
     num_match = re.search(r'(\d+(?:\.\d+)?)\s*(K|k|M|m)?', message)
@@ -494,9 +499,13 @@ async def upload_documents(app_id: str, files: List[UploadFile] = File(...)):
     if state.get("application_status") == "documents_incomplete":
         state["document_result"] = {}
         state["document_validation"] = {}
+        # file_key format is "<filename>:<size>".
+        # Keep processed keys for files not re-uploaded, and drop only the
+        # keys that match freshly uploaded filenames so those files are
+        # guaranteed to be reprocessed.
         kept_processed = []
         for file_key in (state.get("processed_files") or []):
-            base_name = file_key.split(":", 1)[0]
+            base_name = file_key.split(PROCESSED_FILE_KEY_SEPARATOR, 1)[0]
             if base_name not in uploaded_names:
                 kept_processed.append(file_key)
         state["processed_files"] = kept_processed
