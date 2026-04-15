@@ -66,6 +66,9 @@ def collect_node(state: GlobalState) -> dict:
     elif len(extracted) > 1:
         thoughts.append(f"Multi-field extraction: captured {len(extracted)} fields in one message.")
 
+    if extracted:
+        update["in_application_mode"] = True
+
     # ---------------------------------------------------------
     # Credit score trigger
     # ---------------------------------------------------------

@@ -29,6 +29,13 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from src.graph.orchestrator import app_graph
 from src.models.global_state import GlobalState, get_fields_to_ask, get_status_summary
+from src.tools.extraction_tools import (
+    extract_amount,
+    extract_email,
+    extract_loan_term,
+    extract_national_id,
+    extract_phone,
+)
 
 # Direct node imports for pipeline endpoints
 from src.nodes.document_node import document_node
@@ -38,6 +45,7 @@ from src.nodes.decision_node import decision_node
 from src.nodes.triage_node import triage_node
 from src.nodes.policy_node import policy_node
 from src.nodes.responder_node import responder_node
+from src.nodes.triage_node import EXPLICIT_PERSONAL, EXPLICIT_BUSINESS
 
 
 # ===============================================================
@@ -64,6 +72,7 @@ app.add_middleware(
 # Maps application_id → GlobalState dict
 # Lost on server restart. For production, swap with Redis.
 APPLICATIONS: Dict[str, dict] = {}
+PROCESSED_FILE_KEY_SEPARATOR = ":"
 
 # Maps application_id → list of progress messages from pipeline steps
 PROGRESS_LOGS: Dict[str, List[Dict[str, Any]]] = {}
@@ -156,7 +165,10 @@ def create_initial_state() -> dict:
         "rejection_reason": None,
         "credit_score_fetched": False,
         "documents_uploaded": False,
+        "in_application_mode": False,
         "document_result": {},
+        "document_validation": {},
+        "processed_files": [],
         "scoring_result": {},
         "risk_result": {},
         "decision_result": {},
@@ -389,20 +401,41 @@ def _try_recover_missing_fields(state: dict, message: str) -> dict:
     loan_type = state.get("loan_type", "personal")
     critical = CRITICAL_FIELDS_BY_LOAN_TYPE.get(loan_type, {})
 
-    # Extract the first number from the message
-    num_match = re.search(r'(\d+(?:\.\d+)?)\s*(K|k|M|m)?', message)
-    if not num_match:
-        return state
+    chat_extractors = {
+        "national_id": extract_national_id.invoke({"message": message}) if state.get("national_id") is None else None,
+        "email": extract_email.invoke({"message": message}) if state.get("email") is None else None,
+        "phone": extract_phone.invoke({"message": message}) if state.get("phone") is None else None,
+        "loan_amount": extract_amount.invoke({"message": message}) if state.get("loan_amount") is None else None,
+        "loan_term_months": extract_loan_term.invoke({"message": message}) if state.get("loan_term_months") is None else None,
+    }
+    msg_lower = message.lower()
+    if state.get("loan_type") is None:
+        if any(kw in msg_lower for kw in EXPLICIT_PERSONAL):
+            chat_extractors["loan_type"] = "personal"
+        elif any(kw in msg_lower for kw in EXPLICIT_BUSINESS):
+            chat_extractors["loan_type"] = "business"
 
-    raw_num = float(num_match.group(1))
-    mult = num_match.group(2)
-    if mult in ("K", "k"):
-        raw_num *= 1000
-    elif mult in ("M", "m"):
-        raw_num *= 1_000_000
+    updated_any_chat_field = False
+    for field, value in chat_extractors.items():
+        if value is not None and state.get(field) is None:
+            state[field] = value
+            updated_any_chat_field = True
+            print(f"[Recovery] Filled chat field {field} = {value}")
+    if updated_any_chat_field:
+        state["in_application_mode"] = True
+
+    # Extract the first number from the message for document-critical financials
+    num_match = re.search(r'(\d+(?:\.\d+)?)\s*(K|k|M|m)?', message)
+    raw_num = None
+    if num_match:
+        raw_num = float(num_match.group(1))
+        mult = num_match.group(2)
+        if mult in ("K", "k"):
+            raw_num *= 1000
+        elif mult in ("M", "m"):
+            raw_num *= 1_000_000
 
     # Map keywords in the message to field names
-    msg_lower = message.lower()
     field_keywords = {
         "monthly_income": ["income", "salary", "salaire", "revenu"],
         "monthly_cash_flow": ["cash flow", "cashflow", "flux", "trésorerie"],
@@ -419,7 +452,7 @@ def _try_recover_missing_fields(state: dict, message: str) -> dict:
         if state.get(field) is not None:
             continue  # already filled
         keywords = field_keywords.get(field, [])
-        if any(kw in msg_lower for kw in keywords):
+        if raw_num is not None and any(kw in msg_lower for kw in keywords):
             state[field] = raw_num
             filled_field = field
             break
@@ -466,6 +499,18 @@ async def upload_documents(app_id: str, files: List[UploadFile] = File(...)):
     if state.get("application_status") == "documents_incomplete":
         state["document_result"] = {}
         state["document_validation"] = {}
+        # file_key format is "<filename>:<size>".
+        # Keep processed keys for files not re-uploaded, and drop only the
+        # keys that match freshly uploaded filenames so those files are
+        # guaranteed to be reprocessed.
+        kept_processed = []
+        for file_key in (state.get("processed_files") or []):
+            base_name, separator, _ = file_key.partition(PROCESSED_FILE_KEY_SEPARATOR)
+            if not separator:
+                base_name = file_key
+            if base_name not in uploaded_names:
+                kept_processed.append(file_key)
+        state["processed_files"] = kept_processed
         state["application_status"] = "processing_documents"
         add_progress(app_id, "Re-upload detected. Reprocessing documents from scratch...", "info")
 
