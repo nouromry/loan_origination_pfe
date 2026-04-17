@@ -148,8 +148,9 @@ def _build_context_directive(state: GlobalState) -> str:
     if intent == "policy_question":
         policy = state.get("policy_answer", "Our minimum credit score is 600.")
         missing = get_fields_to_ask(state)
+        in_app_mode = state.get("in_application_mode", False)
 
-        if missing:
+        if in_app_mode and missing:
             next_field = missing[0]
             question = FIELD_QUESTIONS.get(next_field, f"Please provide your {next_field.replace('_', ' ')}.")
             return (
@@ -163,7 +164,8 @@ def _build_context_directive(state: GlobalState) -> str:
         else:
             return (
                 f"Answer the user's policy question using this exact info: {policy}. "
-                f"Keep it to 2-3 sentences."
+                f"Keep it to 2-3 sentences. "
+                f"Then ask: 'Is there anything else you'd like to know, or would you like to start a loan application?'"
             )
 
     # ---------------------------------------------------------
@@ -206,6 +208,8 @@ def _build_context_directive(state: GlobalState) -> str:
         failed_docs = report.get("failed_documents", [])
         unknown_docs = report.get("unknown_documents", [])
         missing_docs = report.get("expected_not_uploaded", [])
+        has_quality_problems = bool(failed_docs or unknown_docs)
+        only_missing = bool(missing_docs) and not has_quality_problems
 
         # Build a directive that explains the issue and offers two options
         field_list = ""
@@ -222,17 +226,32 @@ def _build_context_directive(state: GlobalState) -> str:
             doc_issues.append(f"Missing required: {', '.join(missing_docs)}")
         doc_issue_text = " | ".join(doc_issues) if doc_issues else ""
 
+        if only_missing:
+            return (
+                f"Documents are partially processed. Tell the user in a friendly tone that "
+                f"{processed_doc_count(state)} document(s) were processed and more are needed.\n\n"
+                f"MISSING REQUIRED DOCUMENTS: {', '.join(missing_docs)}\n"
+                f"MISSING VALUES:\n{field_list}\n\n"
+                f"Ask them to upload the missing documents via the sidebar, or provide missing values in chat. "
+                f"Keep it warm and encouraging. Do NOT use words like problem, failed, or unfortunately."
+            )
+
+        if has_quality_problems:
+            return (
+                f"Some uploaded documents could not be read clearly.\n"
+                f"SPECIFIC ISSUES: {user_msg}\n"
+                f"DOCUMENT PROBLEMS: {doc_issue_text}\n"
+                f"MISSING VALUES:\n{field_list}\n\n"
+                f"Use an empathetic tone. Ask the user to re-upload clearer versions and offer "
+                f"the option to provide missing values directly in chat."
+            )
+
         return (
-            f"DOCUMENT VALIDATION FAILED. You MUST tell the user there was a problem "
-            f"processing their documents. Do NOT proceed with scoring or decision.\n\n"
-            f"SPECIFIC ISSUES: {user_msg}\n"
-            f"DOCUMENT PROBLEMS: {doc_issue_text}\n"
+            f"Document validation needs additional input before scoring can continue.\n"
+            f"DETAILS: {user_msg}\n"
             f"MISSING VALUES:\n{field_list}\n\n"
-            f"Give the user TWO options clearly:\n"
-            f"1) Re-upload clearer/correct documents using the upload button in the sidebar.\n"
-            f"2) Provide the missing values directly in chat (e.g., 'my monthly income is 3169 TND').\n\n"
-            f"Be empathetic — documents can be tricky to read. Keep it to 4-5 sentences. "
-            f"Do NOT invent any numbers. Do NOT proceed to scoring."
+            f"Ask the user to upload required documents or provide missing values in chat. "
+            f"Keep it concise and helpful."
         )
 
     # ---------------------------------------------------------
@@ -293,6 +312,14 @@ def _build_context_directive(state: GlobalState) -> str:
     # ---------------------------------------------------------
     # CASE 7: Data collection
     # ---------------------------------------------------------
+    if not state.get("in_application_mode", False):
+        return (
+            "The user is browsing, not applying. "
+            "Give a brief friendly response. Then ask: 'Would you like to apply for a loan, "
+            "or is there anything else you'd like to know?' "
+            "DO NOT ask for national ID, email, or any personal information."
+        )
+
     missing_fields = get_fields_to_ask(state)
 
     # 7a: All fields collected but status not yet updated to awaiting_documents
@@ -369,3 +396,7 @@ def _build_upload_directive(state: GlobalState) -> str:
         f"Be enthusiastic about their progress. Keep it brief. "
         f"Do NOT ask any more personal questions — only ask for document uploads."
     )
+
+
+def processed_doc_count(state: GlobalState) -> int:
+    return len(state.get("document_result", {}) or {})

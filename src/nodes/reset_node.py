@@ -27,6 +27,7 @@ def reset_node(state: GlobalState) -> dict:
         "rejection_reason": None,
         "credit_score_fetched": False,
         "documents_uploaded": False,
+        "in_application_mode": False,
         "document_result": {},
         "document_validation": {},
         "processed_files": [],

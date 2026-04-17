@@ -11,6 +11,7 @@ POLICY_SPECIFIC_KEYWORDS = [
     "self-employed", "guarantor", "collateral", "early repayment",
     "taux d'intérêt", "crédit minimum", "pénalité", "garant",
     "document requis", "durée maximum", "remboursement anticipé",
+    "الحد الأدنى", "معدل الفائدة", "الوثائق المطلوبة",
 ]
 
 # Vague "I want to know about policies" patterns — not real questions
@@ -26,17 +27,26 @@ VAGUE_POLICY_PATTERNS = [
     "une question sur",
     "parle-moi des",
     "dis-moi",
+    "سياسات", "شروط القرض", "معلومات عن القرض",
 ]
 
 # Explicit loan type phrases
 EXPLICIT_PERSONAL = [
-    "personal loan", "personal credit", "prêt personnel", "crédit personnel",
+    "personal loan", "personal credit", "prêt personnel", "crédit personnel", "قرض شخصي",
 ]
 EXPLICIT_BUSINESS = [
     "business loan", "business credit", "prêt professionnel",
     "for my business", "for my company", "for my restaurant",
     "for my shop", "for my startup", "pour mon entreprise",
     "pour ma société", "pour mon restaurant", "pour ma boutique",
+    "قرض تجاري", "لشركتي", "لمطعمي",
+]
+APPLICATION_INTENT_PHRASES = [
+    "i want a loan", "i want to apply", "i need a loan",
+    "start my application", "apply for a loan", "ready to apply",
+    "let's start", "let me apply", "get a loan",
+    "je veux un prêt", "je veux un crédit", "demander un prêt",
+    "أريد قرض", "أريد تقديم طلب",
 ]
 
 
@@ -144,10 +154,18 @@ def triage_node(state: GlobalState) -> dict:
 
     detected_intent = result.get("intent", "credit_workflow")
     update = {"intent": detected_intent}
+    if result.get("loan_type") in ("personal", "business"):
+        update["loan_type"] = result.get("loan_type")
     if detected_intent == "credit_workflow":
         update["in_application_mode"] = True
     else:
         update["in_application_mode"] = state.get("in_application_mode", False)
+
+    if not state.get("in_application_mode"):
+        has_intent = any(p in msg_lower for p in APPLICATION_INTENT_PHRASES)
+        has_explicit_type = update.get("loan_type") in ("personal", "business")
+        if has_intent or has_explicit_type:
+            update["in_application_mode"] = True
 
     detected_type = result.get("loan_type")
     if detected_type in ("personal", "business") and not state.get("loan_type"):

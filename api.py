@@ -45,7 +45,9 @@ from src.nodes.decision_node import decision_node
 from src.nodes.triage_node import triage_node
 from src.nodes.policy_node import policy_node
 from src.nodes.responder_node import responder_node
+from src.nodes.reset_node import reset_node
 from src.nodes.triage_node import EXPLICIT_PERSONAL, EXPLICIT_BUSINESS
+from src.agents.collect_agent import CollectAgent
 
 
 # ===============================================================
@@ -76,6 +78,12 @@ PROCESSED_FILE_KEY_SEPARATOR = ":"
 
 # Maps application_id → list of progress messages from pipeline steps
 PROGRESS_LOGS: Dict[str, List[Dict[str, Any]]] = {}
+GREETING_MESSAGE = (
+    "Hello! Welcome to AXE Finance. Whether you're exploring your options "
+    "or ready to apply for a loan, I'm here to help. Feel free to ask me "
+    "anything about our loans and policies, or just tell me you want to "
+    "get started. How can I help?"
+)
 
 
 def get_application(app_id: str) -> dict:
@@ -199,6 +207,11 @@ def get_next_pipeline_step(state: dict) -> Optional[str]:
     has_decision = bool(state.get("decision_result"))
     loan_type = state.get("loan_type")
 
+    if has_doc_result:
+        mandatory = ["loan_type", "loan_amount", "loan_term_months", "national_id"]
+        if any(state.get(f) is None for f in mandatory):
+            return None
+
     if has_docs and not has_doc_result:
         return "document"
     if has_doc_result and not has_scoring:
@@ -264,16 +277,9 @@ def create_application():
     APPLICATIONS[app_id] = state
     PROGRESS_LOGS[app_id] = []
 
-    greeting = (
-        "Hello! Welcome to AXE Finance. Whether you're exploring your options "
-        "or ready to apply for a loan, I'm here to help. Feel free to ask me "
-        "anything about our loans and policies, or just tell me you want to "
-        "get started. How can I help?"
-    )
-
     return CreateApplicationResponse(
         application_id=app_id,
-        greeting=greeting,
+        greeting=GREETING_MESSAGE,
         created_at=state["created_at"],
     )
 
@@ -350,6 +356,23 @@ def send_message(app_id: str, request: ChatMessageRequest):
     state = get_application(app_id)
 
     try:
+        if _is_reset_request(request.message):
+            reset_update = reset_node(state)
+            state.update(reset_update)
+            state["messages"] = [AIMessage(content=GREETING_MESSAGE)]
+            state["last_response"] = GREETING_MESSAGE
+            state["intent"] = None
+            state["updated_at"] = datetime.now().isoformat()
+            APPLICATIONS[app_id] = state
+
+            return ChatMessageResponse(
+                response=GREETING_MESSAGE,
+                application_status=state.get("application_status", "collecting_data"),
+                intent=state.get("intent"),
+                missing_fields=get_fields_to_ask(state),
+                pipeline_ready=False,
+            )
+
         # ---- Manual fallback: recover missing fields from chat ----
         if state.get("application_status") == "documents_incomplete":
             state = _try_recover_missing_fields(state, request.message)
@@ -401,22 +424,20 @@ def _try_recover_missing_fields(state: dict, message: str) -> dict:
     loan_type = state.get("loan_type", "personal")
     critical = CRITICAL_FIELDS_BY_LOAN_TYPE.get(loan_type, {})
 
-    chat_extractors = {
-        "national_id": extract_national_id.invoke({"message": message}) if state.get("national_id") is None else None,
-        "email": extract_email.invoke({"message": message}) if state.get("email") is None else None,
-        "phone": extract_phone.invoke({"message": message}) if state.get("phone") is None else None,
-        "loan_amount": extract_amount.invoke({"message": message}) if state.get("loan_amount") is None else None,
-        "loan_term_months": extract_loan_term.invoke({"message": message}) if state.get("loan_term_months") is None else None,
-    }
     msg_lower = message.lower()
-    if state.get("loan_type") is None:
-        if any(kw in msg_lower for kw in EXPLICIT_PERSONAL):
-            chat_extractors["loan_type"] = "personal"
-        elif any(kw in msg_lower for kw in EXPLICIT_BUSINESS):
-            chat_extractors["loan_type"] = "business"
+    missing_chat_fields = get_fields_to_ask(state)
+    if missing_chat_fields:
+        agent = CollectAgent()
+        result = agent.run_multi(
+            missing_fields=missing_chat_fields,
+            message=message,
+            last_question=state.get("last_response", ""),
+        )
+    else:
+        result = {"extracted": {}}
 
     updated_any_chat_field = False
-    for field, value in chat_extractors.items():
+    for field, value in (result.get("extracted", {}) or {}).items():
         if value is not None and state.get(field) is None:
             state[field] = value
             updated_any_chat_field = True
@@ -469,6 +490,108 @@ def _try_recover_missing_fields(state: dict, message: str) -> dict:
     return state
 
 
+def _build_deterministic_message(state: dict) -> str:
+    app_status = state.get("application_status")
+    report = state.get("document_validation", {}) or {}
+    failed_docs = report.get("failed_documents", []) or []
+    unknown_docs = report.get("unknown_documents", []) or []
+    missing_docs = report.get("expected_not_uploaded", []) or []
+    processed_count = len(state.get("document_result", {}) or {})
+
+    doc_names = {
+        "cin_card": "CIN Card",
+        "salary_slip": "Salary Slip",
+        "bank_statement": "Bank Statement",
+        "business_registration": "Business Registration",
+        "income_statement": "Income Statement",
+        "balance_sheet": "Balance Sheet",
+        "tax_return": "Tax Return",
+        "collateral_appraisal": "Collateral Appraisal",
+        "business_plan": "Business Plan",
+    }
+
+    if state.get("document_result") and state.get("loan_amount") is None:
+        return (
+            "Your documents have been processed. To continue I just need: "
+            "how much you'd like to borrow, over how many months you'd like to repay, "
+            "and your national ID."
+        )
+
+    if app_status == "documents_incomplete":
+        only_missing_expected = bool(missing_docs) and not failed_docs and not unknown_docs
+        if only_missing_expected:
+            friendly_docs = [doc_names.get(d, d.replace("_", " ").title()) for d in missing_docs]
+            return (
+                f"I've processed {processed_count} document(s) so far. "
+                f"To continue, I'll also need: {', '.join(friendly_docs)}. "
+                f"You can upload via sidebar or type values in chat."
+            )
+        if failed_docs or unknown_docs:
+            problematic = failed_docs + unknown_docs
+            return f"I had trouble reading {', '.join(problematic)}. Please re-upload clearer versions."
+
+    if app_status == "approved":
+        decision = state.get("decision_result", {}) or {}
+        amount = decision.get("approved_amount", state.get("loan_amount", "N/A"))
+        rate = decision.get("interest_rate", "N/A")
+        if isinstance(rate, (int, float)):
+            rate = f"{rate:.1%}" if rate <= 1 else f"{rate}%"
+        return f"Great news! Your loan has been APPROVED for {amount} at {rate}."
+
+    if app_status == "rejected":
+        reason = (
+            state.get("rejection_reason")
+            or (state.get("decision_result", {}) or {}).get("reason")
+            or "Application did not meet credit criteria."
+        )
+        return f"Unfortunately your application could not be approved. Reason: {reason}."
+
+    if app_status == "blocked":
+        return "Your application is on hold for manual review."
+
+    return "Your application has been updated. I can guide you through the next step."
+
+
+def _push_assistant_message(app_id: str, state: dict) -> None:
+    app_state = APPLICATIONS.get(app_id)
+    if not app_state:
+        return
+
+    try:
+        response_update = responder_node(state)
+        message = (response_update or {}).get("last_response", "")
+    except Exception:
+        message = ""
+
+    if not message or not str(message).strip():
+        message = _build_deterministic_message(state)
+
+    app_state["last_response"] = message
+    app_state.setdefault("messages", [])
+    app_state["messages"].append(AIMessage(content=message))
+    app_state["updated_at"] = datetime.now().isoformat()
+    APPLICATIONS[app_id] = app_state
+
+
+def _is_reset_request(message: str) -> bool:
+    if not message:
+        return False
+    normalized = message.strip().lower()
+    if len(normalized) >= 80:
+        return False
+
+    reset_phrases = [
+        "start over", "restart", "reset", "cancel", "forget everything", "from scratch",
+        "start again", "new application", "clear everything", "wipe everything",
+        "begin again", "reset application", "cancel application", "let's restart",
+        "recommencer", "annuler", "réinitialiser", "a zéro", "à zéro",
+        "repartir de zero", "repartir à zero", "nouvelle demande", "effacer tout",
+        "oublie tout", "من الصفر", "ابدأ من جديد", "ابدأ من الأول", "اعادة البدء",
+        "إعادة البدء", "إلغاء", "الغاء", "إبدأ من جديد", "ابدأ مرة أخرى",
+    ]
+    return any(phrase in normalized for phrase in reset_phrases)
+
+
 # ===============================================================
 # Endpoint — Document Upload
 # ===============================================================
@@ -493,6 +616,11 @@ async def upload_documents(app_id: str, files: List[UploadFile] = File(...)):
         uploaded_names.append(file.filename)
 
     state["documents_uploaded"] = True
+    if not state.get("in_application_mode"):
+        state["in_application_mode"] = True
+    state["scoring_result"] = {}
+    state["risk_result"] = {}
+    state["decision_result"] = {}
 
     # If this is a RE-UPLOAD (previous validation failed), reset the pipeline
     # state so the documents get reprocessed from scratch
@@ -600,6 +728,7 @@ def _run_full_pipeline_background(app_id: str):
                         report = state.get("document_validation", {})
                         add_progress(app_id, f"Validation failed: {report.get('user_message', 'Issues found')}", "error")
                         add_progress(app_id, "Pipeline paused. Waiting for re-upload or manual value input.", "warning")
+                        _push_assistant_message(app_id, state)
                         break  # exit the pipeline loop — user must act
                     else:
                         add_progress(app_id, "All documents processed and validated.", "success")
@@ -651,6 +780,9 @@ def _run_full_pipeline_background(app_id: str):
                         add_progress(app_id, f"DECISION: CONDITIONAL. {', '.join(conditions[:2])}", "warning")
                     else:
                         add_progress(app_id, f"DECISION: REJECTED. {reason}", "error")
+
+                    if state.get("application_status") in ("approved", "rejected"):
+                        _push_assistant_message(app_id, state)
 
             except Exception as e:
                 import traceback
