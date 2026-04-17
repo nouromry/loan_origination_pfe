@@ -549,8 +549,10 @@ def _build_deterministic_message(state: dict) -> str:
         amount = decision.get("approved_amount", state.get("loan_amount", "N/A"))
         rate = decision.get("interest_rate", "N/A")
         if isinstance(rate, (int, float)):
-            # Values <= 1 are treated as decimals (0.05 => 5.0%), otherwise as percent units (5 => 5.0%).
-            rate = f"{rate:.1%}" if rate <= 1 else f"{rate:.1f}%"
+            # Values < 1 are treated as decimals (0.05 => 5.0%),
+            # values >= 1 are treated as percent units (5 => 5.0%, 1 => 1.0%).
+            normalized_rate = (rate / 100.0) if rate >= 1 else rate
+            rate = f"{normalized_rate:.1%}"
         return f"Great news! Your loan has been APPROVED for {amount} at {rate}."
 
     if app_status == "rejected":
@@ -592,7 +594,7 @@ def _is_reset_request(message: str) -> bool:
     if not message:
         return False
     normalized = message.strip().lower()
-    if len(normalized) >= MAX_RESET_MESSAGE_LENGTH:
+    if len(normalized) > MAX_RESET_MESSAGE_LENGTH:
         return False
 
     return any(phrase in normalized for phrase in RESET_REQUEST_PHRASES)
