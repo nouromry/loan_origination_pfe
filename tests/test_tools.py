@@ -231,3 +231,20 @@ class TestGlobalStateHelpers:
     def test_compute_tier_very_large(self):
         from src.models.global_state import compute_tier
         assert compute_tier({"loan_type": "business", "loan_amount": 600000}) == "very_large"
+
+    def test_validate_document_extraction_is_data_driven_not_file_driven(self):
+        from src.models.global_state import validate_document_extraction
+
+        state = {
+            "loan_type": "personal",
+            "compliance_tier": "personal",
+            "monthly_income": 3169,
+            "monthly_cash_flow": 1999,
+            "document_result": {
+                "cin.pdf": {"type": "cin_card", "result": {"cin_national_id": "12714074"}}
+            },
+        }
+        report = validate_document_extraction(state)
+        assert report["has_issues"] is False
+        assert "salary_slip" in report["missing_required_documents"]
+        assert "bank_statement" in report["missing_required_documents"]

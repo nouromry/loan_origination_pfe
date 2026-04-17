@@ -1,7 +1,8 @@
 # src/nodes/collect_node.py
 
-from src.models.global_state import GlobalState, get_fields_to_ask, compute_tier
+from src.models.global_state import GlobalState, get_fields_to_ask, compute_tier, validate_document_extraction
 from src.agents.collect_agent import CollectAgent
+import re
 
 
 def collect_node(state: GlobalState) -> dict:
@@ -20,15 +21,25 @@ def collect_node(state: GlobalState) -> dict:
     thoughts = list(state.get("thought_steps", []))
 
     # ---------------------------------------------------------
+    # Correction flow: resolve CIN mismatch / partial extraction
+    # ---------------------------------------------------------
+    correction_update = _try_resolve_identity_correction(state, messages[-1].content)
+    if correction_update:
+        thoughts.extend(correction_update.pop("thought_steps", []))
+        correction_update["thought_steps"] = thoughts
+        return correction_update
+
+    # ---------------------------------------------------------
     # Nothing to collect
     # ---------------------------------------------------------
     if not fields_to_ask:
         update = {}
         if not state.get("documents_uploaded"):
-            update["application_status"] = "awaiting_documents"
+            update["application_status"] = "collecting"
             update["stage"] = "collecting"
             thoughts.append("All required fields collected. Waiting for document upload.")
         else:
+            update["application_status"] = "processing"
             update["stage"] = "processing"
             thoughts.append("All fields collected and documents uploaded. Ready for processing.")
         update["thought_steps"] = thoughts
@@ -90,8 +101,55 @@ def collect_node(state: GlobalState) -> dict:
     merged = {**state, **update}
     remaining = get_fields_to_ask(merged)
     if not remaining:
-        update["application_status"] = "awaiting_documents"
+        update["application_status"] = "collecting"
         thoughts.append("All required fields now collected!")
 
     update["thought_steps"] = thoughts
     return update
+
+
+def _try_resolve_identity_correction(state: GlobalState, latest_message: str) -> dict:
+    """Resolve recoverable CIN mismatch in-chat without blocking the application."""
+    if state.get("application_status") != "needs_correction":
+        return {}
+
+    mismatch = state.get("identity_mismatch") or {}
+    if not mismatch:
+        return {}
+
+    update = {}
+    thoughts = []
+    message_lower = (latest_message or "").lower()
+    cin_id = mismatch.get("cin_national_id") or state.get("cin_national_id")
+
+    use_document_choice = any(k in message_lower for k in ["use document", "document id", "option 2"])
+    if use_document_choice and cin_id:
+        update["national_id"] = cin_id
+        thoughts.append("User selected document ID as the authoritative national ID.")
+    else:
+        extracted_ids = re.findall(r'(?<!\d)\d{8}(?!\d)', latest_message or "")
+        if extracted_ids:
+            update["national_id"] = extracted_ids[-1]
+            thoughts.append("User provided corrected typed national ID.")
+        elif any(k in message_lower for k in ["correct my typed id", "option 1", "typed id"]):
+            thoughts.append("User chose to correct typed ID but did not provide the new 8-digit value yet.")
+            return {"application_status": "needs_correction", "thought_steps": thoughts}
+        else:
+            return {}
+
+    merged = {**state, **update}
+    merged["identity_mismatch"] = {}
+    merged["rejection_reason"] = None
+    report = validate_document_extraction(merged)
+    update["document_validation"] = report
+    update["identity_mismatch"] = {}
+    update["rejection_reason"] = None
+    update["in_application_mode"] = True
+
+    if report.get("has_issues") or merged.get("cin_missing_fields"):
+        update["application_status"] = "needs_correction"
+    else:
+        update["application_status"] = "ready_for_scoring"
+        thoughts.append("Identity correction resolved. Application is ready for scoring.")
+
+    return {"thought_steps": thoughts, **update}

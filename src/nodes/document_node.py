@@ -47,11 +47,13 @@ def document_node(state: GlobalState) -> GlobalState:
     Processes all uploaded documents.
     The node orchestrates; tools and agent do the work.
     """
-    state["application_status"] = "processing_documents"
+    state["application_status"] = "processing"
     state["stage"] = "processing"
     add_thought(state, "Processing uploaded documents...")
     if state.get("processed_files") is None:
         state["processed_files"] = []
+    if state.get("cin_missing_fields") is None:
+        state["cin_missing_fields"] = []
 
     # 1. Find files
     upload_dir = os.getenv("TEMP_UPLOADS_DIR", "./temp_uploads")
@@ -88,11 +90,20 @@ def document_node(state: GlobalState) -> GlobalState:
         if file_key not in processed:
             files_to_process.append((file_path, file_key))
 
-    if not files_to_process:
-        add_thought(state, f"All {len(all_files)} document(s) already processed. Nothing new to do.")
-        return state
+    replaced_keys_by_file = {}
+    for file_path, file_key in files_to_process:
+        file_name = os.path.basename(file_path)
+        replaced_keys = [
+            key for key in processed
+            if key.startswith(f"{file_name}:") and key != file_key
+        ]
+        if replaced_keys:
+            replaced_keys_by_file[file_name] = replaced_keys
 
-    add_thought(state, f"Found {len(all_files)} document(s) total, {len(files_to_process)} new to process.")
+    if not files_to_process:
+        add_thought(state, f"All {len(all_files)} document(s) already processed. Running validation checks only.")
+    else:
+        add_thought(state, f"Found {len(all_files)} document(s) total, {len(files_to_process)} new to process.")
 
     # 2. Process each file: extract → classify → parse
     # Keep prior results — only ADD new ones
@@ -101,6 +112,15 @@ def document_node(state: GlobalState) -> GlobalState:
     for file_path, file_key in files_to_process:
         file_name = os.path.basename(file_path)
         add_thought(state, f"Processing: {file_name}")
+
+        # Explicit replacement support: same filename re-uploaded with new size
+        replaced_keys = replaced_keys_by_file.get(file_name, [])
+        if replaced_keys:
+            state["processed_files"] = [
+                key for key in state.get("processed_files", [])
+                if key not in replaced_keys
+            ]
+            add_thought(state, f"Detected replaced file for {file_name}. Reprocessing latest version only.")
 
         # Step A: Extract text
         text_result = extract_text.invoke({"file_path": file_path})
@@ -166,11 +186,14 @@ def document_node(state: GlobalState) -> GlobalState:
     report = validate_document_extraction(state)
     state["document_validation"] = report
 
-    if report["has_issues"]:
-        state["application_status"] = "documents_incomplete"
+    cin_missing_fields = list(state.get("cin_missing_fields") or [])
+    identity_mismatch = state.get("identity_mismatch")
+
+    if identity_mismatch or cin_missing_fields or report["has_issues"]:
+        state["application_status"] = "needs_correction"
         add_thought(state, f"Document validation FAILED: {report['user_message']}")
     else:
-        state["application_status"] = "documents_processed"
+        state["application_status"] = "ready_for_scoring"
         add_thought(state, "Document validation passed: all critical data extracted.")
 
     return state
@@ -217,6 +240,22 @@ def _process_cin_card(state: GlobalState, text: str, file_name: str) -> dict:
 
     quality = result.get("extraction_quality", "unknown")
     fields_found = result.get("fields_extracted", 0)
+    missing_fields = []
+    for field in ["cin_national_id", "cin_date_of_birth", "name", "home_address"]:
+        if result.get(field) in (None, ""):
+            missing_fields.append(field)
+    result["missing_fields"] = missing_fields
+
+    if quality == "partial" and missing_fields:
+        state["cin_missing_fields"] = missing_fields
+        state["application_status"] = "needs_correction"
+        add_thought(
+            state,
+            f"CIN extraction is partial. User confirmation needed for: {', '.join(missing_fields)}."
+        )
+    else:
+        state["cin_missing_fields"] = []
+
     add_thought(state, f"CIN parsed: {fields_found}/4 fields extracted (quality: {quality})")
 
     return result
@@ -342,14 +381,17 @@ def _run_cross_checks(state: GlobalState) -> None:
             "cin_dob": state.get("cin_date_of_birth"),
         })
 
-        if check.get("fraud_flag"):
-            state["application_status"] = "blocked"
-            state["rejection_reason"] = (
-                f"FRAUD FLAG: {'; '.join(check.get('mismatches', []))}. "
-                f"Application blocked for manual review."
-            )
-            add_thought(state, f"⚠️ CROSS-CHECK FAILED: {check.get('mismatches')}")
+        if check.get("id_match") is False:
+            state["application_status"] = "needs_correction"
+            state["identity_mismatch"] = {
+                "typed_national_id": typed_id,
+                "cin_national_id": cin_id,
+                "mismatches": check.get("mismatches", []),
+            }
+            add_thought(state, f"⚠️ CIN ID mismatch detected. Waiting for user confirmation.")
             return
+
+        state["identity_mismatch"] = {}
 
         add_thought(state, "CIN cross-check passed: IDs match.")
 
@@ -359,8 +401,6 @@ def _run_cross_checks(state: GlobalState) -> None:
 
     elif cin_id is None:
         add_thought(state, "CIN card not uploaded or CIN number not extracted — cross-check skipped.")
+        state["identity_mismatch"] = {}
 
-    # If we got here without blocking, mark as processed
-    if state.get("application_status") != "blocked":
-        state["application_status"] = "documents_processed"
-        add_thought(state, "All document processing and cross-checks complete.")
+    add_thought(state, "All document processing and cross-checks complete.")

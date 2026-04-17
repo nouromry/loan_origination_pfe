@@ -52,7 +52,7 @@ def test_reset_node_clears_application_data():
         "messages": [HumanMessage(content="start over")],
     }
     out = reset_node(state)
-    assert out["application_status"] == "collecting_data"
+    assert out["application_status"] == "collecting"
     assert out["loan_type"] is None
     assert out["national_id"] is None
     assert out["documents_uploaded"] is False
@@ -114,7 +114,7 @@ def test_document_node_keeps_prior_results(tmp_path, monkeypatch):
             "failed_documents": [],
             "unknown_documents": [],
             "missing_critical_fields": [],
-            "expected_not_uploaded": [],
+            "missing_required_documents": [],
             "user_message": "ok",
         },
     )
@@ -178,7 +178,7 @@ def test_document_node_reupload_reprocesses(tmp_path, monkeypatch):
             "failed_documents": [],
             "unknown_documents": [],
             "missing_critical_fields": [],
-            "expected_not_uploaded": [],
+            "missing_required_documents": [],
             "user_message": "ok",
         },
     )
@@ -194,7 +194,7 @@ def test_document_node_reupload_reprocesses(tmp_path, monkeypatch):
     out = dn.document_node(state)
 
     assert out["document_result"]["salary.pdf"]["result"]["net_salary"] == 4500
-    assert old_key in out["processed_files"]
+    assert old_key not in out["processed_files"]
     assert new_key in out["processed_files"]
 
 
@@ -228,11 +228,11 @@ def test_orchestrator_routes_to_document_for_unprocessed_incremental_upload(tmp_
     assert route(state) == "collect"
 
 
-def test_orchestrator_documents_incomplete_can_route_to_collect_for_chat_recovery():
+def test_orchestrator_needs_correction_can_route_to_collect_for_chat_recovery():
     from src.graph.orchestrator import route
 
     state = {
-        "application_status": "documents_incomplete",
+        "application_status": "needs_correction",
         "intent": "credit_workflow",
         "loan_type": "personal",
         "loan_amount": None,
@@ -243,11 +243,11 @@ def test_orchestrator_documents_incomplete_can_route_to_collect_for_chat_recover
     assert route(state) == "collect"
 
 
-def test_orchestrator_documents_incomplete_routes_to_responder_without_extractable_chat():
+def test_orchestrator_needs_correction_routes_to_responder_without_extractable_chat():
     from src.graph.orchestrator import route
 
     state = {
-        "application_status": "documents_incomplete",
+        "application_status": "needs_correction",
         "intent": "credit_workflow",
         "loan_type": "personal",
         "loan_amount": None,
@@ -256,3 +256,81 @@ def test_orchestrator_documents_incomplete_routes_to_responder_without_extractab
         "messages": [HumanMessage(content="okay thanks")],
     }
     assert route(state) == "responder"
+
+
+def test_document_node_cin_mismatch_sets_needs_correction_not_blocked(tmp_path, monkeypatch):
+    from src.nodes import document_node as dn
+
+    app_id = "APP_MISMATCH_1"
+    app_dir = tmp_path / app_id
+    app_dir.mkdir()
+    cin_path = app_dir / "cin.pdf"
+    cin_path.write_bytes(b"cin-content")
+
+    monkeypatch.setenv("TEMP_UPLOADS_DIR", str(tmp_path))
+
+    class _Tool:
+        def __init__(self, fn):
+            self._fn = fn
+
+        def invoke(self, payload):
+            return self._fn(payload)
+
+    monkeypatch.setattr(dn, "extract_text", _Tool(lambda payload: {"success": True, "text": "x" * 120}))
+    monkeypatch.setattr(dn, "ocr_extract_text", _Tool(lambda payload: {"success": False, "error": "unused"}))
+    monkeypatch.setattr(dn, "classify_document_type", _Tool(lambda payload: "cin_card"))
+    monkeypatch.setattr(
+        dn, "parse_cin_card", _Tool(lambda payload: {"cin_national_id": "12714074", "fields_extracted": 4, "extraction_quality": "good"})
+    )
+    monkeypatch.setattr(
+        dn,
+        "cross_check_cin",
+        _Tool(lambda payload: {"id_match": False, "fraud_flag": True, "mismatches": ["National ID mismatch"]}),
+    )
+
+    import src.models.global_state as gs
+    monkeypatch.setattr(
+        gs,
+        "validate_document_extraction",
+        lambda state: {
+            "has_issues": False,
+            "failed_documents": [],
+            "unknown_documents": [],
+            "missing_critical_fields": [],
+            "missing_required_documents": [],
+            "user_message": "ok",
+        },
+    )
+
+    state = {
+        "application_id": app_id,
+        "loan_type": "personal",
+        "national_id": "12567898",
+        "thought_steps": [],
+        "processed_files": [],
+        "document_result": {},
+    }
+    out = dn.document_node(state)
+    assert out["application_status"] == "needs_correction"
+    assert out.get("identity_mismatch")
+    assert out.get("rejection_reason") is None
+
+
+def test_collect_node_resolves_identity_mismatch_using_document_id():
+    from src.nodes.collect_node import collect_node
+
+    state = {
+        "application_status": "needs_correction",
+        "identity_mismatch": {"typed_national_id": "12567898", "cin_national_id": "12714074"},
+        "cin_national_id": "12714074",
+        "loan_type": "personal",
+        "monthly_income": 3169,
+        "monthly_cash_flow": 1999,
+        "messages": [HumanMessage(content="Use document ID please")],
+        "thought_steps": [],
+    }
+
+    out = collect_node(state)
+    assert out["national_id"] == "12714074"
+    assert out["application_status"] == "ready_for_scoring"
+    assert out["identity_mismatch"] == {}
