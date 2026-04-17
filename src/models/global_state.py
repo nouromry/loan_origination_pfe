@@ -4,6 +4,10 @@ from typing import TypedDict, Optional, List, Dict, Any, Annotated
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
+CORRECTION_KEYWORDS = (
+    "use document", "document id", "typed id", "correct", "option 1", "option 2"
+)
+
 
 def add_thought(state: dict, thought: str) -> None:
     """Helper to append a thought step to the state."""
@@ -263,9 +267,14 @@ def validate_document_extraction(state: dict) -> dict:
             report["missing_required_documents"].append(doc_type)
 
     # ---- Summary ----
+    # Data-driven validation:
+    # `missing_critical_fields` below are extracted data fields (e.g., monthly_income),
+    # not document type names. Missing required document files are tracked as
+    # informational and do not block progress if these critical values exist.
     report["has_issues"] = bool(
         report["failed_documents"]
         or report["unknown_documents"]
+        # Missing required documents alone are not blocking if critical data exists.
         or report["missing_critical_fields"]
     )
 

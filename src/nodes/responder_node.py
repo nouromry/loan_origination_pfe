@@ -249,18 +249,13 @@ def _build_context_directive(state: GlobalState) -> str:
         doc_issue_text = " | ".join(doc_issues) if doc_issues else ""
 
         if missing_without_quality_issues:
-            if not missing_fields:
-                return (
-                    f"Critical financial values are already extracted and validated. "
-                    f"Do not ask for re-upload of already validated documents. "
-                    f"Briefly inform the user processing can continue."
-                )
             return (
                 f"Documents are partially processed. Tell the user in a friendly tone that "
                 f"{get_processed_document_count(state)} document(s) were processed and more are needed.\n\n"
                 f"MISSING REQUIRED DOCUMENTS: {', '.join(missing_docs)}\n"
                 f"MISSING VALUES:\n{field_list}\n\n"
-                f"Ask them to upload the missing documents, or provide missing values in chat."
+                f"Ask them to upload the missing documents (in the documents upload area/sidebar), "
+                f"or provide missing values in chat."
             )
 
         if has_quality_problems:

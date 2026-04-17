@@ -1,8 +1,17 @@
 # src/nodes/collect_node.py
 
-from src.models.global_state import GlobalState, get_fields_to_ask, compute_tier, validate_document_extraction
+from src.models.global_state import (
+    GlobalState,
+    get_fields_to_ask,
+    compute_tier,
+    validate_document_extraction,
+    CORRECTION_KEYWORDS,
+)
 from src.agents.collect_agent import CollectAgent
 import re
+
+CIN_ID_PATTERN = r'(?<!\d)\d{8}(?!\d)'
+CORRECTION_CHOICE_KEYWORDS = ("correct", "typed id", "option 1")
 
 
 def collect_node(state: GlobalState) -> dict:
@@ -127,11 +136,11 @@ def _try_resolve_identity_correction(state: GlobalState, latest_message: str) ->
         update["national_id"] = cin_id
         thoughts.append("User selected document ID as the authoritative national ID.")
     else:
-        extracted_ids = re.findall(r'(?<!\d)\d{8}(?!\d)', latest_message or "")
+        extracted_ids = re.findall(CIN_ID_PATTERN, latest_message or "")
         if extracted_ids:
             update["national_id"] = extracted_ids[-1]
             thoughts.append("User provided corrected typed national ID.")
-        elif any(k in message_lower for k in ["correct my typed id", "option 1", "typed id"]):
+        elif any(k in message_lower for k in CORRECTION_CHOICE_KEYWORDS):
             thoughts.append("User chose to correct typed ID but did not provide the new 8-digit value yet.")
             return {"application_status": "needs_correction", "thought_steps": thoughts}
         else:

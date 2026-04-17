@@ -193,7 +193,9 @@ def test_document_node_reupload_reprocesses(tmp_path, monkeypatch):
 
     out = dn.document_node(state)
 
+    # Replacement keeps only the latest filename entry and latest processed key.
     assert out["document_result"]["salary.pdf"]["result"]["net_salary"] == 4500
+    assert set(out["document_result"].keys()) == {"salary.pdf"}
     assert old_key not in out["processed_files"]
     assert new_key in out["processed_files"]
 

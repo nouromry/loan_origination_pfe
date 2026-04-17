@@ -40,6 +40,7 @@ TABULAR_DOC_TYPES = {
 
 # Minimum characters to consider text extraction successful
 MIN_TEXT_LENGTH = 50
+CIN_EXTRACTED_FIELDS = ("cin_national_id", "cin_date_of_birth", "name", "home_address")
 
 
 def document_node(state: GlobalState) -> GlobalState:
@@ -91,6 +92,7 @@ def document_node(state: GlobalState) -> GlobalState:
             files_to_process.append((file_path, file_key))
 
     replaced_keys_by_file = {}
+    replaced_keys_to_remove = set()
     for file_path, file_key in files_to_process:
         file_name = os.path.basename(file_path)
         replaced_keys = [
@@ -99,6 +101,13 @@ def document_node(state: GlobalState) -> GlobalState:
         ]
         if replaced_keys:
             replaced_keys_by_file[file_name] = replaced_keys
+            replaced_keys_to_remove.update(replaced_keys)
+
+    if replaced_keys_to_remove:
+        state["processed_files"] = [
+            key for key in state.get("processed_files", [])
+            if key not in replaced_keys_to_remove
+        ]
 
     if not files_to_process:
         add_thought(state, f"All {len(all_files)} document(s) already processed. Running validation checks only.")
@@ -116,10 +125,6 @@ def document_node(state: GlobalState) -> GlobalState:
         # Explicit replacement support: same filename re-uploaded with new size
         replaced_keys = replaced_keys_by_file.get(file_name, [])
         if replaced_keys:
-            state["processed_files"] = [
-                key for key in state.get("processed_files", [])
-                if key not in replaced_keys
-            ]
             add_thought(state, f"Detected replaced file for {file_name}. Reprocessing latest version only.")
 
         # Step A: Extract text
@@ -241,14 +246,13 @@ def _process_cin_card(state: GlobalState, text: str, file_name: str) -> dict:
     quality = result.get("extraction_quality", "unknown")
     fields_found = result.get("fields_extracted", 0)
     missing_fields = []
-    for field in ["cin_national_id", "cin_date_of_birth", "name", "home_address"]:
+    for field in CIN_EXTRACTED_FIELDS:
         if result.get(field) in (None, ""):
             missing_fields.append(field)
     result["missing_fields"] = missing_fields
 
     if quality == "partial" and missing_fields:
         state["cin_missing_fields"] = missing_fields
-        state["application_status"] = "needs_correction"
         add_thought(
             state,
             f"CIN extraction is partial. User confirmation needed for: {', '.join(missing_fields)}."

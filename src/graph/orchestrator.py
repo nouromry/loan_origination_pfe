@@ -14,7 +14,7 @@ Flow:
 import os
 import re
 from langgraph.graph import StateGraph, END
-from src.models.global_state import GlobalState
+from src.models.global_state import GlobalState, CORRECTION_KEYWORDS
 from src.graph.node_factory import node_factory
 
 
@@ -101,10 +101,7 @@ def route(state: GlobalState) -> str:
         if messages:
             latest = messages[-1].content if hasattr(messages[-1], "content") else str(messages[-1])
             latest_lower = latest.lower()
-            correction_keywords = (
-                "use document", "document id", "typed id", "correct", "option 1", "option 2"
-            )
-            if re.search(r"\d|@", latest) or any(k in latest_lower for k in correction_keywords):
+            if re.search(r"\d|@", latest) or any(k in latest_lower for k in CORRECTION_KEYWORDS):
                 return "collect"
 
         # Nothing useful in the message — show correction guidance
@@ -118,7 +115,11 @@ def route(state: GlobalState) -> str:
     #    Checks both: never-processed (document_result empty) AND incremental
     #    (new files added after prior processing)
     if state.get("documents_uploaded") and (
-        _has_unprocessed_files(state) or state.get("application_status") == "processing"
+        _has_unprocessed_files(state)
+        or (
+            state.get("application_status") == "processing"
+            and state.get("stage") == "processing"
+        )
     ):
         return "document"
 
