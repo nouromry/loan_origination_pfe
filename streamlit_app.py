@@ -256,13 +256,16 @@ def handle_upload(uploaded_files):
 
 def poll_pipeline():
     """
-    Polls pipeline status. Adds new progress messages to chat.
+    Poll pipeline status. Adds new progress messages to chat.
     Also pulls assistant messages pushed by the background pipeline
     (validation failures, decisions) using last_pushed_response tracker.
+    Updates st.session_state.pipeline_running each poll and fetches full
+    state only when the backend may have changed (running/new progress/just-finished).
     """
     try:
         result = get_pipeline_status(st.session_state.app_id)
         progress_log = result.get("progress_log", [])
+        was_running = st.session_state.pipeline_running
 
         # Add only NEW progress messages to chat
         already_seen = sum(1 for entry in st.session_state.chat_history if entry[0] == "progress")
@@ -276,18 +279,24 @@ def poll_pipeline():
         # Pull any new assistant messages pushed by the background pipeline.
         # This is polled every cycle so users see background assistant updates
         # (e.g., validation failures/decisions) as soon as they are available.
-        try:
-            full = get_full_state(st.session_state.app_id)
-            api_last_response = full["state"].get("last_response", "") or ""
-            if api_last_response and api_last_response != st.session_state.last_pushed_response:
-                st.session_state.chat_history.append(("assistant", api_last_response))
-                st.session_state.last_pushed_response = api_last_response
-        except APIError:
-            pass
-
         # Update running flag
-        was_running = st.session_state.pipeline_running
         st.session_state.pipeline_running = result.get("running", False)
+        should_fetch_assistant_updates = st.session_state.pipeline_running or was_running or bool(new_messages)
+
+        if should_fetch_assistant_updates:
+            try:
+                full = get_full_state(st.session_state.app_id)
+                api_last_response = full["state"].get("last_response", "")
+                if api_last_response and api_last_response != st.session_state.last_pushed_response:
+                    if not any(
+                        entry[0] == "assistant" and entry[1] == api_last_response
+                        for entry in st.session_state.chat_history
+                    ):
+                        st.session_state.chat_history.append(("assistant", api_last_response))
+                    st.session_state.last_pushed_response = api_last_response
+            except APIError:
+                # Non-blocking: polling should continue even if full-state fetch fails.
+                pass
 
     except APIError:
         pass
@@ -383,7 +392,7 @@ with st.sidebar:
 
     # Document upload
     st.markdown("**Upload documents**")
-    st.caption("Upload your CIN, salary slip, bank statement, etc. at any time.")
+    st.caption("Upload required loan documents (e.g., CIN, salary slip, bank statement) at any time.")
 
     uploaded_files = st.file_uploader(
         "Drop files here",
