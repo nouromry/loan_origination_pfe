@@ -78,12 +78,36 @@ PROCESSED_FILE_KEY_SEPARATOR = ":"
 
 # Maps application_id → list of progress messages from pipeline steps
 PROGRESS_LOGS: Dict[str, List[Dict[str, Any]]] = {}
+# Keep reset detection strict to short command-like messages and avoid long-text false triggers.
+# 80 chars comfortably fits common reset intents in EN/FR/AR while excluding longer mixed requests.
+MAX_RESET_MESSAGE_LENGTH = 80
+MANDATORY_PIPELINE_FIELDS = ["loan_type", "loan_amount", "loan_term_months", "national_id"]
 GREETING_MESSAGE = (
     "Hello! Welcome to AXE Finance. Whether you're exploring your options "
     "or ready to apply for a loan, I'm here to help. Feel free to ask me "
     "anything about our loans and policies, or just tell me you want to "
     "get started. How can I help?"
 )
+DOCUMENT_TYPE_NAMES = {
+    "cin_card": "CIN Card",
+    "salary_slip": "Salary Slip",
+    "bank_statement": "Bank Statement",
+    "business_registration": "Business Registration",
+    "income_statement": "Income Statement",
+    "balance_sheet": "Balance Sheet",
+    "tax_return": "Tax Return",
+    "collateral_appraisal": "Collateral Appraisal",
+    "business_plan": "Business Plan",
+}
+RESET_REQUEST_PHRASES = [
+    "start over", "restart", "reset", "cancel", "forget everything", "from scratch",
+    "start again", "new application", "clear everything", "wipe everything",
+    "begin again", "reset application", "cancel application", "let's restart",
+    "recommencer", "annuler", "réinitialiser", "a zéro", "à zéro",
+    "repartir de zero", "repartir à zero", "nouvelle demande", "effacer tout",
+    "oublie tout", "من الصفر", "ابدأ من جديد", "ابدأ من الأول", "اعادة البدء",
+    "إعادة البدء", "إلغاء", "الغاء", "إبدأ من جديد", "ابدأ مرة أخرى",
+]
 
 
 def get_application(app_id: str) -> dict:
@@ -207,9 +231,10 @@ def get_next_pipeline_step(state: dict) -> Optional[str]:
     has_decision = bool(state.get("decision_result"))
     loan_type = state.get("loan_type")
 
+    # Even after docs are available, scoring must wait for mandatory
+    # chat-provided identity/loan fields required by downstream logic.
     if has_doc_result:
-        mandatory = ["loan_type", "loan_amount", "loan_term_months", "national_id"]
-        if any(state.get(f) is None for f in mandatory):
+        if any(state.get(f) is None for f in MANDATORY_PIPELINE_FIELDS):
             return None
 
     if has_docs and not has_doc_result:
@@ -491,24 +516,13 @@ def _try_recover_missing_fields(state: dict, message: str) -> dict:
 
 
 def _build_deterministic_message(state: dict) -> str:
+    """Build a safe fallback assistant message from deterministic state rules."""
     app_status = state.get("application_status")
     report = state.get("document_validation", {}) or {}
     failed_docs = report.get("failed_documents", []) or []
     unknown_docs = report.get("unknown_documents", []) or []
     missing_docs = report.get("expected_not_uploaded", []) or []
     processed_count = len(state.get("document_result", {}) or {})
-
-    doc_names = {
-        "cin_card": "CIN Card",
-        "salary_slip": "Salary Slip",
-        "bank_statement": "Bank Statement",
-        "business_registration": "Business Registration",
-        "income_statement": "Income Statement",
-        "balance_sheet": "Balance Sheet",
-        "tax_return": "Tax Return",
-        "collateral_appraisal": "Collateral Appraisal",
-        "business_plan": "Business Plan",
-    }
 
     if state.get("document_result") and state.get("loan_amount") is None:
         return (
@@ -520,7 +534,7 @@ def _build_deterministic_message(state: dict) -> str:
     if app_status == "documents_incomplete":
         only_missing_expected = bool(missing_docs) and not failed_docs and not unknown_docs
         if only_missing_expected:
-            friendly_docs = [doc_names.get(d, d.replace("_", " ").title()) for d in missing_docs]
+            friendly_docs = [DOCUMENT_TYPE_NAMES.get(d, d.replace("_", " ").title()) for d in missing_docs]
             return (
                 f"I've processed {processed_count} document(s) so far. "
                 f"To continue, I'll also need: {', '.join(friendly_docs)}. "
@@ -535,7 +549,8 @@ def _build_deterministic_message(state: dict) -> str:
         amount = decision.get("approved_amount", state.get("loan_amount", "N/A"))
         rate = decision.get("interest_rate", "N/A")
         if isinstance(rate, (int, float)):
-            rate = f"{rate:.1%}" if rate <= 1 else f"{rate}%"
+            # Values <= 1 are treated as decimals (0.05 => 5.0%), otherwise as percent units (5 => 5.0%).
+            rate = f"{rate:.1%}" if rate <= 1 else f"{rate:.1f}%"
         return f"Great news! Your loan has been APPROVED for {amount} at {rate}."
 
     if app_status == "rejected":
@@ -577,19 +592,10 @@ def _is_reset_request(message: str) -> bool:
     if not message:
         return False
     normalized = message.strip().lower()
-    if len(normalized) >= 80:
+    if len(normalized) >= MAX_RESET_MESSAGE_LENGTH:
         return False
 
-    reset_phrases = [
-        "start over", "restart", "reset", "cancel", "forget everything", "from scratch",
-        "start again", "new application", "clear everything", "wipe everything",
-        "begin again", "reset application", "cancel application", "let's restart",
-        "recommencer", "annuler", "réinitialiser", "a zéro", "à zéro",
-        "repartir de zero", "repartir à zero", "nouvelle demande", "effacer tout",
-        "oublie tout", "من الصفر", "ابدأ من جديد", "ابدأ من الأول", "اعادة البدء",
-        "إعادة البدء", "إلغاء", "الغاء", "إبدأ من جديد", "ابدأ مرة أخرى",
-    ]
-    return any(phrase in normalized for phrase in reset_phrases)
+    return any(phrase in normalized for phrase in RESET_REQUEST_PHRASES)
 
 
 # ===============================================================

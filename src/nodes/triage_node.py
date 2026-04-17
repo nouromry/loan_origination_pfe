@@ -153,19 +153,17 @@ def triage_node(state: GlobalState) -> dict:
     )
 
     detected_intent = result.get("intent", "credit_workflow")
-    update = {"intent": detected_intent}
-    if result.get("loan_type") in ("personal", "business"):
-        update["loan_type"] = result.get("loan_type")
-    if detected_intent == "credit_workflow":
-        update["in_application_mode"] = True
-    else:
-        update["in_application_mode"] = state.get("in_application_mode", False)
-
-    if not state.get("in_application_mode"):
-        has_intent = any(p in msg_lower for p in APPLICATION_INTENT_PHRASES)
-        has_explicit_type = update.get("loan_type") in ("personal", "business")
-        if has_intent or has_explicit_type:
-            update["in_application_mode"] = True
+    was_in_app_mode = state.get("in_application_mode", False)
+    has_intent_phrase = any(p in msg_lower for p in APPLICATION_INTENT_PHRASES)
+    has_explicit_type = result.get("loan_type") in ("personal", "business")
+    should_activate_application_mode = (
+        detected_intent == "credit_workflow"
+        or (not was_in_app_mode and (has_intent_phrase or has_explicit_type))
+    )
+    update = {
+        "intent": detected_intent,
+        "in_application_mode": True if should_activate_application_mode else was_in_app_mode,
+    }
 
     detected_type = result.get("loan_type")
     if detected_type in ("personal", "business") and not state.get("loan_type"):

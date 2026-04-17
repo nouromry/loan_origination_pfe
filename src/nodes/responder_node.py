@@ -209,7 +209,7 @@ def _build_context_directive(state: GlobalState) -> str:
         unknown_docs = report.get("unknown_documents", [])
         missing_docs = report.get("expected_not_uploaded", [])
         has_quality_problems = bool(failed_docs or unknown_docs)
-        only_missing = bool(missing_docs) and not has_quality_problems
+        missing_without_quality_issues = bool(missing_docs) and not has_quality_problems
 
         # Build a directive that explains the issue and offers two options
         field_list = ""
@@ -226,10 +226,10 @@ def _build_context_directive(state: GlobalState) -> str:
             doc_issues.append(f"Missing required: {', '.join(missing_docs)}")
         doc_issue_text = " | ".join(doc_issues) if doc_issues else ""
 
-        if only_missing:
+        if missing_without_quality_issues:
             return (
                 f"Documents are partially processed. Tell the user in a friendly tone that "
-                f"{processed_doc_count(state)} document(s) were processed and more are needed.\n\n"
+                f"{get_processed_document_count(state)} document(s) were processed and more are needed.\n\n"
                 f"MISSING REQUIRED DOCUMENTS: {', '.join(missing_docs)}\n"
                 f"MISSING VALUES:\n{field_list}\n\n"
                 f"Ask them to upload the missing documents via the sidebar, or provide missing values in chat. "
@@ -398,5 +398,6 @@ def _build_upload_directive(state: GlobalState) -> str:
     )
 
 
-def processed_doc_count(state: GlobalState) -> int:
-    return len(state.get("document_result", {}) or {})
+def get_processed_document_count(state: GlobalState) -> int:
+    """Return how many processed document records exist (one per filename key)."""
+    return len(state.get("document_result", {}))
