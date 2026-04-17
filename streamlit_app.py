@@ -281,9 +281,9 @@ def poll_pipeline():
         # (e.g., validation failures/decisions) as soon as they are available.
         # Update running flag
         st.session_state.pipeline_running = result.get("running", False)
-        should_fetch_assistant_updates = st.session_state.pipeline_running or was_running or bool(new_messages)
+        should_fetch_full_state = st.session_state.pipeline_running or was_running or bool(new_messages)
 
-        if should_fetch_assistant_updates:
+        if should_fetch_full_state:
             try:
                 full = get_full_state(st.session_state.app_id)
                 api_last_response = full["state"].get("last_response", "")
@@ -392,7 +392,7 @@ with st.sidebar:
 
     # Document upload
     st.markdown("**Upload documents**")
-    st.caption("Upload required loan documents (e.g., CIN, salary slip, bank statement) at any time.")
+    st.caption("Upload loan documents (e.g., CIN, salary slip, bank statement) at any time.")
 
     uploaded_files = st.file_uploader(
         "Drop files here",
