@@ -256,7 +256,7 @@ def handle_upload(uploaded_files):
 
 def poll_pipeline():
     """
-    Poll pipeline status. Adds new progress messages to chat.
+    Polls pipeline status. Adds new progress messages to chat.
     Also pulls assistant messages pushed by the background pipeline
     (validation failures, decisions) using last_pushed_response tracker.
     """
@@ -273,7 +273,9 @@ def poll_pipeline():
         # Refresh status
         st.session_state.last_status = get_status(st.session_state.app_id)
 
-        # Pull any new assistant messages pushed by the background pipeline
+        # Pull any new assistant messages pushed by the background pipeline.
+        # This is polled every cycle so users see background assistant updates
+        # (e.g., validation failures/decisions) as soon as they are available.
         try:
             full = get_full_state(st.session_state.app_id)
             api_last_response = full["state"].get("last_response", "") or ""
