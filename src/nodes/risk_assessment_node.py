@@ -21,7 +21,7 @@ def risk_assessment_node(state: GlobalState) -> GlobalState:
     if state.get("loan_type") != "business":
         return state
 
-    state["application_status"] = "risk_assessment"
+    state["application_status"] = "processing"
     state["stage"] = "scoring"
     add_thought(state, "Running business risk assessment...")
 
@@ -52,7 +52,7 @@ def risk_assessment_node(state: GlobalState) -> GlobalState:
     passed = result.get("passed_count", 0)
     total = result.get("total_ratios", 0)
 
-    state["application_status"] = "risk_assessed"
+    state["application_status"] = "processing"
     add_thought(state, f"Risk assessment complete. {passed}/{total} ratios passed. Level: {risk_level.upper()}")
 
     return state

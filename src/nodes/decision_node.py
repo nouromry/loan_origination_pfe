@@ -16,7 +16,7 @@ def decision_node(state: GlobalState) -> GlobalState:
     All logic (hard rules, interest rate, LLM explanation,
     letter rendering, DB save) lives in DecisionAgent.
     """
-    state["application_status"] = "making_decision"
+    state["application_status"] = "processing"
     state["stage"] = "decision"
     add_thought(state, "Making final credit decision...")
 

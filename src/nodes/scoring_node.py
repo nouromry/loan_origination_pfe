@@ -12,7 +12,7 @@ def scoring_node(state: GlobalState) -> GlobalState:
     For business loans, monthly_income may not come from a salary slip.
     Fallback order: monthly_income → monthly_cash_flow → net_income/12
     """
-    state["application_status"] = "scoring"
+    state["application_status"] = "processing"
     state["stage"] = "scoring"
     add_thought(state, "Running scoring pipeline...")
 
@@ -62,7 +62,7 @@ def scoring_node(state: GlobalState) -> GlobalState:
             "api_available": False,
             "summary": "Scoring incomplete — missing income or loan data.",
         }
-        state["application_status"] = "scored"
+        state["application_status"] = "processing"
         return state
 
     agent = ScoringAgent()
@@ -79,7 +79,7 @@ def scoring_node(state: GlobalState) -> GlobalState:
     risk = result.get("risk_category", "unknown")
     dti = result.get("dti")
 
-    state["application_status"] = "scored"
+    state["application_status"] = "processing"
     add_thought(
         state,
         f"Scoring complete. DTI={dti}, Risk={risk}"

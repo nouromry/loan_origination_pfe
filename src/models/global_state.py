@@ -4,6 +4,10 @@ from typing import TypedDict, Optional, List, Dict, Any, Annotated
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
+CORRECTION_KEYWORDS = (
+    "use document", "document id", "typed id", "correct", "option 1", "option 2"
+)
+
 
 def add_thought(state: dict, thought: str) -> None:
     """Helper to append a thought step to the state."""
@@ -18,7 +22,7 @@ def get_status_summary(state: dict) -> str:
     Called by the responder when the user asks 'what's my status?'
     """
     app_id = state.get("application_id", "N/A")
-    app_status = state.get("application_status", "collecting_data")
+    app_status = state.get("application_status", "collecting")
     loan_type = state.get("loan_type", "not determined yet")
     loan_amount = state.get("loan_amount")
     stage = state.get("stage", "collecting")
@@ -190,7 +194,7 @@ def validate_document_extraction(state: dict) -> dict:
             "failed_documents": [filename, ...],
             "unknown_documents": [filename, ...],
             "missing_critical_fields": [{"field": name, "description": text}, ...],
-            "expected_not_uploaded": [doc_type, ...],
+            "missing_required_documents": [doc_type, ...],
             "user_message": "...",   # human-readable summary
         }
     """
@@ -200,7 +204,7 @@ def validate_document_extraction(state: dict) -> dict:
             "failed_documents": [],
             "unknown_documents": [],
             "missing_critical_fields": [],
-            "expected_not_uploaded": [],
+            "missing_required_documents": [],
             "user_message": "Documents extracted. Full validation will run once loan type is known.",
             "skipped": True,
         }
@@ -214,7 +218,8 @@ def validate_document_extraction(state: dict) -> dict:
         "failed_documents": [],
         "unknown_documents": [],
         "missing_critical_fields": [],
-        "expected_not_uploaded": [],
+        "missing_required_documents": [],
+        "validated_document_types": [],
         "user_message": "",
     }
 
@@ -241,7 +246,7 @@ def validate_document_extraction(state: dict) -> dict:
                 "description": description,
             })
 
-    # ---- Check 3: Expected tier documents not uploaded ----
+    # ---- Check 3: Required documents missing (informational only) ----
     # We need the settings to know the tier requirements. Since we can't
     # import BaseAgent here (circular), we hardcode the tier map.
     TIER_DOCS = {
@@ -256,16 +261,21 @@ def validate_document_extraction(state: dict) -> dict:
                        "collateral_appraisal", "business_plan"],
     }
     expected = TIER_DOCS.get(tier, TIER_DOCS["personal"])
+    report["validated_document_types"] = sorted(uploaded_types)
     for doc_type in expected:
         if doc_type not in uploaded_types:
-            report["expected_not_uploaded"].append(doc_type)
+            report["missing_required_documents"].append(doc_type)
 
     # ---- Summary ----
+    # Data-driven validation:
+    # `missing_critical_fields` below are extracted data fields (e.g., monthly_income),
+    # not document type names. Missing required document files are tracked as
+    # informational and do not block progress if these critical values exist.
     report["has_issues"] = bool(
         report["failed_documents"]
         or report["unknown_documents"]
+        # Missing required documents alone are not blocking if critical data exists.
         or report["missing_critical_fields"]
-        or report["expected_not_uploaded"]
     )
 
     # ---- Build a user-friendly message ----
@@ -282,7 +292,7 @@ def validate_document_extraction(state: dict) -> dict:
             f"{', '.join(report['unknown_documents'])}. Please make sure you uploaded "
             f"the correct document type."
         )
-    if report["expected_not_uploaded"]:
+    if report["missing_required_documents"]:
         doc_names = {
             "cin_card": "CIN Card",
             "salary_slip": "Salary Slip",
@@ -294,8 +304,11 @@ def validate_document_extraction(state: dict) -> dict:
             "collateral_appraisal": "Collateral Appraisal",
             "business_plan": "Business Plan",
         }
-        missing_names = [doc_names.get(d, d) for d in report["expected_not_uploaded"]]
-        lines.append(f"Missing required document(s): {', '.join(missing_names)}.")
+        missing_names = [doc_names.get(d, d) for d in report["missing_required_documents"]]
+        # Informational only: we do not fail validation if critical extracted data exists
+        # and files are otherwise readable.
+        if report["missing_critical_fields"] or report["failed_documents"] or report["unknown_documents"]:
+            lines.append(f"Missing required document(s): {', '.join(missing_names)}.")
     if report["missing_critical_fields"]:
         descriptions = [f["description"] for f in report["missing_critical_fields"]]
         lines.append(
@@ -348,7 +361,7 @@ class GlobalState(TypedDict, total=False):
     preferred_currency: str               # Default 'TND'
     intent: Optional[str]  # credit_workflow | policy_question | vague_policy | ask_status | ask_data | reset
     stage: str                            # 'collecting' | 'processing' | 'scoring' | 'decision' | 'complete'
-    application_status: str               # 'collecting_data' | 'pending_review' | 'approved' | 'rejected' | 'blocked'
+    application_status: str               # 'collecting' | 'processing' | 'needs_correction' | 'ready_for_scoring' | 'approved' | 'rejected'
     rejection_reason: Optional[str]
 
     # State Booleans
@@ -363,6 +376,8 @@ class GlobalState(TypedDict, total=False):
     risk_result: Dict[str, Any]
     decision_result: Dict[str, Any]
     processed_files: List[str]
+    identity_mismatch: Dict[str, Any]
+    cin_missing_fields: List[str]
 
     # Conversation & UI
     thought_steps: List[str]              # Chain of thought exposed to the UI

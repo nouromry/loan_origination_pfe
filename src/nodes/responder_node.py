@@ -93,7 +93,7 @@ def _generate_llm_response(state: GlobalState) -> str:
 
 
 def _build_context_directive(state: GlobalState) -> str:
-    app_status = state.get("application_status", "collecting_data")
+    app_status = state.get("application_status", "collecting")
     intent = state.get("intent", "credit_workflow")
     stage = state.get("stage", "collecting")
 
@@ -121,7 +121,7 @@ def _build_context_directive(state: GlobalState) -> str:
             )
 
     # ---------------------------------------------------------
-    # CASE 1: Final states — approved / rejected / blocked
+    # CASE 1: Final states — approved / rejected
     # ---------------------------------------------------------
     if app_status == "approved":
         decision = state.get("decision_result", {})
@@ -133,13 +133,12 @@ def _build_context_directive(state: GlobalState) -> str:
             f"Keep it celebratory but professional. Mention next steps (signing, disbursement)."
         )
 
-    if app_status in ("rejected", "blocked"):
+    if app_status == "rejected":
         reason = state.get("rejection_reason", "Application did not meet credit criteria.")
         return (
-            f"The loan application was {'BLOCKED' if app_status == 'blocked' else 'REJECTED'}.\n"
+            f"The loan application was REJECTED.\n"
             f"Reason: {reason}\n"
-            f"Be empathetic and clear. If blocked, explain it's under manual review. "
-            f"If rejected, suggest what the user could improve."
+            f"Be empathetic and clear. Suggest what the user could improve."
         )
 
     # ---------------------------------------------------------
@@ -197,19 +196,42 @@ def _build_context_directive(state: GlobalState) -> str:
         )
 
     # ---------------------------------------------------------
-    # CASE 2.8: Documents were processed but validation failed
+    # CASE 2.8: Documents need user correction before scoring
     # Missing critical fields, failed extraction, unknown type, etc.
     # The user needs to either re-upload or provide missing values.
     # ---------------------------------------------------------
-    if app_status == "documents_incomplete":
+    if app_status == "needs_correction":
+        mismatch = state.get("identity_mismatch") or {}
+        cin_missing_fields = list(state.get("cin_missing_fields") or [])
         report = state.get("document_validation", {}) or {}
         user_msg = report.get("user_message", "Some documents could not be processed.")
         missing_fields = report.get("missing_critical_fields", [])
         failed_docs = report.get("failed_documents", [])
         unknown_docs = report.get("unknown_documents", [])
-        missing_docs = report.get("expected_not_uploaded", [])
+        missing_docs = report.get("missing_required_documents", [])
         has_quality_problems = bool(failed_docs or unknown_docs)
         missing_without_quality_issues = bool(missing_docs) and not has_quality_problems
+
+        if mismatch:
+            typed_id = mismatch.get("typed_national_id", "unknown")
+            cin_id = mismatch.get("cin_national_id", "unknown")
+            return (
+                f"We detected a national ID mismatch.\n"
+                f"Typed ID: {typed_id}\n"
+                f"Document ID: {cin_id}\n\n"
+                f"Ask the user to choose ONE option:\n"
+                f"1) Correct my typed ID (share the correct 8-digit ID)\n"
+                f"2) Use document ID\n\n"
+                f"Use a supportive tone and explain this is a correction step, not a rejection."
+            )
+
+        if cin_missing_fields:
+            return (
+                f"CIN extraction is partial and needs confirmation.\n"
+                f"Missing CIN fields: {', '.join(cin_missing_fields)}\n\n"
+                f"Ask the user to confirm or provide those missing identity values in chat "
+                f"(name, date of birth, address as applicable). Keep it concise and helpful."
+            )
 
         # Build a directive that explains the issue and offers two options
         field_list = ""
@@ -232,8 +254,8 @@ def _build_context_directive(state: GlobalState) -> str:
                 f"{get_processed_document_count(state)} document(s) were processed and more are needed.\n\n"
                 f"MISSING REQUIRED DOCUMENTS: {', '.join(missing_docs)}\n"
                 f"MISSING VALUES:\n{field_list}\n\n"
-                f"Ask them to upload the missing documents via the sidebar, or provide missing values in chat. "
-                f"Keep it warm and encouraging. Do NOT use words like problem, failed, or unfortunately."
+                f"Ask them to upload the missing documents (in the documents upload area/sidebar), "
+                f"or provide missing values in chat."
             )
 
         if has_quality_problems:
@@ -304,13 +326,7 @@ def _build_context_directive(state: GlobalState) -> str:
         )
 
     # ---------------------------------------------------------
-    # CASE 6: Awaiting documents (status already set)
-    # ---------------------------------------------------------
-    if app_status == "awaiting_documents":
-        return _build_upload_directive(state)
-
-    # ---------------------------------------------------------
-    # CASE 7: Data collection
+    # CASE 6: Data collection
     # ---------------------------------------------------------
     if not state.get("in_application_mode", False):
         return (
@@ -322,7 +338,7 @@ def _build_context_directive(state: GlobalState) -> str:
 
     missing_fields = get_fields_to_ask(state)
 
-    # 7a: All fields collected but status not yet updated to awaiting_documents
+    # 6a: All fields collected and waiting for upload/processing
     #     This catches the gap between collect_node setting the last field
     #     and the status being updated. Without this, the LLM falls to
     #     CASE 8 and hallucinated random questions.
@@ -336,7 +352,7 @@ def _build_context_directive(state: GlobalState) -> str:
                 f"Do NOT ask any more personal questions."
             )
 
-    # 7b: Still have fields to collect — ask the next one
+    # 6b: Still have fields to collect — ask the next one
     next_field = missing_fields[0]
     question_to_ask = FIELD_QUESTIONS.get(
         next_field,

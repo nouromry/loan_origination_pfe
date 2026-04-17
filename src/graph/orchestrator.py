@@ -14,7 +14,7 @@ Flow:
 import os
 import re
 from langgraph.graph import StateGraph, END
-from src.models.global_state import GlobalState
+from src.models.global_state import GlobalState, CORRECTION_KEYWORDS
 from src.graph.node_factory import node_factory
 
 
@@ -71,8 +71,8 @@ def route(state: GlobalState) -> str:
     Called after triage on every single message.
     """
 
-    # 0. If application is blocked/rejected, go straight to responder
-    if state.get("application_status") in ("blocked", "rejected", "approved"):
+    # 0. Final states go straight to responder
+    if state.get("application_status") in ("rejected", "approved"):
         if state.get("decision_result") or state.get("rejection_reason"):
             return "responder"
 
@@ -93,21 +93,18 @@ def route(state: GlobalState) -> str:
     if state.get("intent") == "vague_policy":
         return "responder"
 
-    # 0.7. Document validation failed — but FIRST try to extract any chat data
-    #      from the user's message (loan_amount, email, phone, etc.).
-    #      Only block on documents_incomplete if there's nothing to extract.
-    if state.get("application_status") == "documents_incomplete":
+    # 0.7. Correction flow: unresolved validation mismatch/partial extraction.
+    if state.get("application_status") == "needs_correction":
         # If the user provided any extractable data in chat, route to collect
         # so we can capture it. On the NEXT turn, validation rechecks.
-        if _missing_mandatory_chat_fields(state):
-            messages = state.get("messages", [])
-            if messages:
-                latest = messages[-1].content if hasattr(messages[-1], "content") else str(messages[-1])
-                # If message contains digits or @, it may have extractable data
-                if re.search(r"\d|@", latest):
-                    return "collect"
+        messages = state.get("messages", [])
+        if messages:
+            latest = messages[-1].content if hasattr(messages[-1], "content") else str(messages[-1])
+            latest_lower = latest.lower()
+            if re.search(r"\d|@", latest) or any(k in latest_lower for k in CORRECTION_KEYWORDS):
+                return "collect"
 
-        # Nothing useful in the message — show the "documents needed" message
+        # Nothing useful in the message — show correction guidance
         return "responder"
 
     # 1. Policy question → skip everything → answer and return
@@ -117,7 +114,13 @@ def route(state: GlobalState) -> str:
     # 2. Documents uploaded but some are not yet processed → process them now
     #    Checks both: never-processed (document_result empty) AND incremental
     #    (new files added after prior processing)
-    if state.get("documents_uploaded") and _has_unprocessed_files(state):
+    if state.get("documents_uploaded") and (
+        _has_unprocessed_files(state)
+        or (
+            state.get("application_status") == "processing"
+            and state.get("stage") == "processing"
+        )
+    ):
         return "document"
 
     # 2.5. Documents processed but mandatory chat fields still missing
@@ -126,8 +129,12 @@ def route(state: GlobalState) -> str:
         if _missing_mandatory_chat_fields(state):
             return "collect"
 
-    # 3. Documents processed, all chat fields present, DTI not yet calculated → score
-    if state.get("document_result") and not state.get("scoring_result"):
+    # 3. Documents validated and ready, DTI not yet calculated → score
+    if (
+        state.get("document_result")
+        and state.get("application_status") == "ready_for_scoring"
+        and not state.get("scoring_result")
+    ):
         return "scoring"
 
     # 4. Business loan → run risk assessment before decision
