@@ -194,6 +194,17 @@ def validate_document_extraction(state: dict) -> dict:
             "user_message": "...",   # human-readable summary
         }
     """
+    if not state.get("loan_type"):
+        return {
+            "has_issues": False,
+            "failed_documents": [],
+            "unknown_documents": [],
+            "missing_critical_fields": [],
+            "expected_not_uploaded": [],
+            "user_message": "Documents extracted. Full validation will run once loan type is known.",
+            "skipped": True,
+        }
+
     loan_type = state.get("loan_type", "personal")
     tier = state.get("compliance_tier", "personal")
     doc_result = state.get("document_result", {}) or {}
@@ -335,7 +346,7 @@ class GlobalState(TypedDict, total=False):
     loan_type: Optional[str]              # 'personal' | 'business' | 'unknown'
     compliance_tier: Optional[str]        # 'personal' | 'small' | 'medium' | 'large' | 'very_large'
     preferred_currency: str               # Default 'TND'
-    intent: Optional[str]                 # 'credit_workflow' | 'policy_question'
+    intent: Optional[str]  # credit_workflow | policy_question | vague_policy | ask_status | ask_data | reset
     stage: str                            # 'collecting' | 'processing' | 'scoring' | 'decision' | 'complete'
     application_status: str               # 'collecting_data' | 'pending_review' | 'approved' | 'rejected' | 'blocked'
     rejection_reason: Optional[str]
