@@ -174,6 +174,7 @@ if "app_id" not in st.session_state:
     st.session_state.seen_progress_count = 0  # how many progress messages we've shown
     st.session_state.api_available = None
     st.session_state.debug_mode = False
+    st.session_state.last_pushed_response = ""
 
 
 def check_api():
@@ -202,6 +203,7 @@ def init_application():
         result = create_new_application()
         st.session_state.app_id = result["application_id"]
         st.session_state.chat_history = [("assistant", result["greeting"])]
+        st.session_state.last_pushed_response = result["greeting"]
         st.session_state.pipeline_running = False
         st.session_state.seen_progress_count = 0
         st.session_state.last_status = get_status(st.session_state.app_id)
@@ -214,6 +216,7 @@ def reset_application():
         delete_application(st.session_state.app_id)
     st.session_state.app_id = None
     st.session_state.chat_history = []
+    st.session_state.last_pushed_response = ""
     st.session_state.last_status = {}
     st.session_state.pipeline_running = False
     st.session_state.seen_progress_count = 0
@@ -225,6 +228,7 @@ def handle_user_message(message: str):
     try:
         result = send_chat_message(st.session_state.app_id, message)
         st.session_state.chat_history.append(("assistant", result["response"]))
+        st.session_state.last_pushed_response = result["response"]
         st.session_state.last_status = get_status(st.session_state.app_id)
     except APIError as e:
         st.session_state.chat_history.append(("assistant", f"Error: {str(e)[:120]}"))
@@ -252,9 +256,9 @@ def handle_upload(uploaded_files):
 
 def poll_pipeline():
     """
-    Poll the pipeline status. Fast (~50ms call).
-    Adds new progress messages to chat history.
-    Updates pipeline_running flag.
+    Poll pipeline status. Adds new progress messages to chat.
+    Also pulls assistant messages pushed by the background pipeline
+    (validation failures, decisions) using last_pushed_response tracker.
     """
     try:
         result = get_pipeline_status(st.session_state.app_id)
@@ -269,20 +273,19 @@ def poll_pipeline():
         # Refresh status
         st.session_state.last_status = get_status(st.session_state.app_id)
 
-        # If pipeline finished, fetch decision explanation
+        # Pull any new assistant messages pushed by the background pipeline
+        try:
+            full = get_full_state(st.session_state.app_id)
+            api_last_response = full["state"].get("last_response", "") or ""
+            if api_last_response and api_last_response != st.session_state.last_pushed_response:
+                st.session_state.chat_history.append(("assistant", api_last_response))
+                st.session_state.last_pushed_response = api_last_response
+        except APIError:
+            pass
+
+        # Update running flag
         was_running = st.session_state.pipeline_running
         st.session_state.pipeline_running = result.get("running", False)
-
-        if was_running and not st.session_state.pipeline_running:
-            # Pipeline just finished — fetch the decision explanation if any
-            full = get_full_state(st.session_state.app_id)
-            decision = full["state"].get("decision_result", {})
-            explanation = decision.get("explanation", "")
-            if explanation:
-                # Avoid duplicating
-                if not any(entry[0] == "assistant" and entry[1] == explanation
-                           for entry in st.session_state.chat_history):
-                    st.session_state.chat_history.append(("assistant", explanation))
 
     except APIError:
         pass
@@ -378,22 +381,19 @@ with st.sidebar:
 
     # Document upload
     st.markdown("**Upload documents**")
-    fields_done = len(missing) == 0
+    st.caption("Upload your CIN, salary slip, bank statement, etc. at any time.")
 
-    if not fields_done:
-        st.caption("Complete the application form first.")
-    else:
-        uploaded_files = st.file_uploader(
-            "Drop files here",
-            type=["pdf", "png", "jpg", "jpeg", "tiff"],
-            accept_multiple_files=True,
-            key="doc_upload",
-            label_visibility="collapsed",
-        )
-        if uploaded_files:
-            if st.button("Upload and process", type="primary", use_container_width=True):
-                handle_upload(uploaded_files)
-                st.rerun()
+    uploaded_files = st.file_uploader(
+        "Drop files here",
+        type=["pdf", "png", "jpg", "jpeg", "tiff"],
+        accept_multiple_files=True,
+        key="doc_upload",
+        label_visibility="collapsed",
+    )
+    if uploaded_files:
+        if st.button("Upload and process", type="primary", use_container_width=True):
+            handle_upload(uploaded_files)
+            st.rerun()
 
     # Decision letter download
     if progress.get("decision_made"):
